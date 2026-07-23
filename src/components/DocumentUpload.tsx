@@ -96,12 +96,15 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          image_base64: base64Data
+          image_base64: base64Data,
+          image: base64Data,       // احتياطاً
+          fileData: base64Data     // احتياطاً
         })
       });
 
       if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Server error: ${response.status} - ${errorText}`);
       }
 
       setProgress(90);
@@ -114,7 +117,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       setOcrResult({ text, category });
     } catch (error) {
       console.error('PaddleOCR Error:', error);
-      alert('حدث خطأ أثناء الاتصال بسيرفر الذكاء الاصطناعي (PaddleOCR). تأكد من أن السيرفر يعمل على المنفذ 5000.');
+      alert(`حدث خطأ أثناء الاتصال بسيرفر PaddleOCR:\n${error instanceof Error ? error.message : 'خطأ غير معروف'}`);
     } finally {
       setIsProcessing(false);
     }
