@@ -1,0 +1,6 @@
+{
+  "name": "نظام أرشفة الوثائق (DMS)",
+  "description": "نظام متكامل لإدارة وأرشفة الوثائق مع دعم OCR للغة العربية وتوليد الباركود والفهرسة الذكية.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
