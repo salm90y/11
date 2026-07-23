@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
-import { createWorker } from 'tesseract.js';
 import { Document, DocumentCategory } from '../types';
 
 interface DocumentUploadProps {
@@ -86,25 +85,36 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const processOCR = async () => {
     if (!preview) return;
     setIsProcessing(true);
-    setProgress(0);
+    setProgress(10);
     
     try {
-      const worker = await createWorker('ara+eng', 1, {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            setProgress(Math.round(m.progress * 100));
-          }
-        }
+      // إرسال الصورة للسيرفر المحلي (PaddleOCR)
+      const base64Data = preview.split(',')[1];
+      const response = await fetch('http://127.0.0.1:5000/api/ocr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image_base64: base64Data
+        })
       });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      setProgress(90);
+      const data = await response.json();
       
-      const { data: { text } } = await worker.recognize(preview);
-      await worker.terminate();
+      const text = data.text || '';
+      setProgress(100);
       
       const category = classifyText(text);
       setOcrResult({ text, category });
     } catch (error) {
-      console.error('Local OCR Error:', error);
-      alert('حدث خطأ أثناء معالجة النص محلياً. تأكد من جودة الصورة.');
+      console.error('PaddleOCR Error:', error);
+      alert('حدث خطأ أثناء الاتصال بسيرفر الذكاء الاصطناعي (PaddleOCR). تأكد من أن السيرفر يعمل على المنفذ 5000.');
     } finally {
       setIsProcessing(false);
     }
