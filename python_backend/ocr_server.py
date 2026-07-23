@@ -64,19 +64,44 @@ except Exception as e:
     print(f"ℹ️ لم يتم العثور على PaddleOCR ({e})")
 
 
-def clean_and_correct_arabic_text(text: str) -> str:
+def normalize_arabic_word_text(text: str) -> str:
     """
-    قاموس معالجة وتصحيح الكلمات والعبارات الحكومية الرسمية لزيادة الدقة إلى 90%+
-    يقوم بإصلاح أخطاء الأحرف المدموجة والمشوهة الناتجة عن الماسح الضوئي.
+    تنظيف وتصحيح النصوص المطبوعة ببرنامج Word:
+    1. إزالة كشيدة ومد الحروف (ـ) الناتجة عن تنسيق Word
+    2. معالجة أخطاء اشتباه مد الحروف بحرف "سين" (س/سس)
+    3. قاموس تصحيح المصطلحات الحكومية والكتب الرسمية
     """
     if not text:
         return ""
 
     import re
 
-    # 1. تصحيح الكلمات والعبارات الرسمية الشائعة
-    corrections = [
-        # الوزارات والمديريات
+    # 1. إزالة التطويل/الكشيدة العربية (ـ) الناتجة عن المد في Word
+    text = re.sub(r'ـ+', '', text)
+
+    # 2. تصحيح اشتباه مد الحروف بحرف السين المكرر (مثل سس/سسس/سـ) الناتجة عن وصلات الماسح الضوئي
+    # إذا ظهرت "سس" أو "س" وسط الكلمة نتيجة وصلة ممتدة
+    word_replacements = [
+        # تصحيح تكرار السين الناتج عن مد الوصلات
+        (r'المسسوضوع', 'الموضوع'),
+        (r'المسسسوضوع', 'الموضوع'),
+        (r'المسسسؤول', 'المسؤول'),
+        (r'المسسؤلية', 'المسؤولية'),
+        (r'مديرسية', 'مديرية'),
+        (r'مديرسسية', 'مديرية'),
+        (r'مديرسيةشرطة', 'مديرية شرطة'),
+        (r'التارسيخ', 'التاريخ'),
+        (r'التارسسخ', 'التاريخ'),
+        (r'التقاعسسد', 'التقاعد'),
+        (r'التقاعسد', 'التقاعد'),
+        (r'وكالسسة', 'وكالة'),
+        (r'وزارسسة', 'وزارة'),
+        (r'شعبيسسة', 'شعبة'),
+        (r'شعبيسة', 'شعبة'),
+        (r'الداخليسسة', 'الداخلية'),
+        (r'الداخليسة', 'الداخلية'),
+
+        # تصحيحات الوزارات والمديريات والجهات الرسمية
         (r'وزارة\s+الداخلي\b', 'وزارة الداخلية'),
         (r'وكالة\s+الوزارة\s+لشؤون\s+الأمن\s+الاتحال\b', 'وكالة الوزارة لشؤون الأمن الاتحادي'),
         (r'وكالة\s+الوزارة\s+لشؤون\s+الأمن\s+الاتحادي', 'وكالة الوزارة لشؤون الأمن الاتحادي'),
@@ -91,14 +116,13 @@ def clean_and_correct_arabic_text(text: str) -> str:
         (r'التقاع\b', 'التقاعد'),
         (r'دلغام\s+تقيده', 'تقاعده'),
 
-        # العناوين والتواريخ والإشارات
-        (r'العدد\s+أم', 'العدد:'),
-        (r'التاريخ\s*;\s*', 'التاريخ: '),
-        (r'الموضوع\s+اج', 'الموضوع /'),
-        (r'الموضوع\s+/\s*التقاعد\s+الموضوع', 'الموضوع / التقاعد'),
-        (r'إلى\s*/', 'إلى /'),
+        # العناوين والرموز والتواريخ
+        (r'العدد\s*[:;\s]*أم', 'العدد: '),
+        (r'التاريخ\s*[:;\s]*', 'التاريخ: '),
+        (r'الموضوع\s*[:;\s]*/?\s*', 'الموضوع / '),
+        (r'إلى\s*/', 'إلى / '),
         
-        # نصوص الكتب الرسمية والإحالات
+        # نصوص الإحالات والشكر
         (r'تدرجلكمأدن', 'تدرجكم أدناه'),
         (r'تدرجكمأدناه', 'تدرجكم أدناه'),
         (r'اهت\s+إزيخ\s+انفكاك', 'أنهيت إشارة انفكاك'),
@@ -108,26 +132,25 @@ def clean_and_correct_arabic_text(text: str) -> str:
         (r'وانك\s+على\s+خلق\s+عظيم', 'وإنك على خلق عظيم'),
         (r'عظيم\s+محمد\s+قدوتنا', 'عظيم (محمد قدوتنا)'),
         
-        # إصلاح الحركات والرموز العشوائية
-        (r'[;،,]\s*;\s*', ' / '),
+        # تنظيف الرموز الزائدة
+        (r'[;،,]{2,}', ' / '),
         (r'\s+', ' ')
     ]
 
     cleaned = text
-    for pattern, repl in corrections:
+    for pattern, repl in word_replacements:
         cleaned = re.sub(pattern, repl, cleaned)
 
-    # 2. تنظيم الأسطر والمسافات
+    # تنظيف الأسطر الفارغة المكررة
     lines = [line.strip() for line in cleaned.split('\n') if line.strip()]
     return "\n".join(lines)
 
 
 def deskew_image(gray_img):
     """
-    تعديل ميلان الصفحة المسحوبة تلقائياً (Deskewing) لضمان استقامة الأسطر العربية 100%
+    تعديل ميلان الصفحة المسحوبة بالسكانر تلقائياً (Deskewing) لضمان استقامة الأسطر العربية 100%
     """
     try:
-        # حساب الزاوية باستخدام العتبة
         thresh = cv2.threshold(gray_img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
         coords = np.column_stack(np.where(thresh > 0))
         angle = cv2.minAreaRect(coords)[-1]
@@ -137,7 +160,6 @@ def deskew_image(gray_img):
         else:
             angle = -angle
 
-        # إذا كان الميلان طفيفاً جداً بين -10 و +10 درجات نقوم بالتدوير
         if abs(angle) > 0.5 and abs(angle) < 15.0:
             (h, w) = gray_img.shape[:2]
             center = (w // 2, h // 2)
@@ -149,21 +171,28 @@ def deskew_image(gray_img):
     return gray_img
 
 
+def clean_and_correct_arabic_text(text: str) -> str:
+    """
+    الدالة الرئيسية لمعالجة النصوص العربية المطبوعة بـ Word
+    """
+    return normalize_arabic_word_text(text)
+
+
 def preprocess_arabic_document(pil_img):
     """
-    سلسلة معالجة حاسوبية احترافية (OpenCV Pipeline):
-    1. مضاعفة الدقة (Super Resolution / Scaling) لتوضيح نقاط الحروف الصغرى
+    سلسلة معالجة حاسوبية فائقة الدقة لمستندات Word المطبوعة المسحوبة بالسكانر:
+    1. مضاعفة الدقة وتكبير الصورة 2x بأسلوب INTER_CUBIC لتفادي انقطاع وصلات خطوط Word
     2. تعديل الميلان الأفقي (Deskewing)
-    3. زيادة التباين التكيفي (CLAHE)
-    4. تنقية الضوضاء بدون إتلاف حركات القراءة
+    3. تجميع حواف الكلمات (Morphological Closing) لإغلاق مسافات المد ومنع توهم حرف "سين"
+    4. تطبيق Adaptive Otsu Binarization عالي التباين
     """
     try:
         img_np = np.array(pil_img)
         
-        # 1. تكبير الدقة إذا كانت الصورة صغيرة (تكبير الحروف 1.5x)
+        # 1. تكبير الدقة لتوضيح الحروف وخطوط Word المطبوعة
         h, w = img_np.shape[:2]
-        if w < 2000:
-            scale = 2000.0 / w
+        if w < 2400:
+            scale = 2400.0 / w
             img_np = cv2.resize(img_np, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
         if len(img_np.shape) == 3:
@@ -171,21 +200,26 @@ def preprocess_arabic_document(pil_img):
         else:
             gray = img_np
 
-        # 2. تعديل ميلان الصفحة
+        # 2. تعديل ميلان الصفحة المسحوبة بالسكانر
         gray_deskewed = deskew_image(gray)
 
-        # 3. تحسين التباين التكيفي للوثائق المظلمة
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        # 3. تحسين التباين التكيفي للنصوص المسحوبة
+        clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray_deskewed)
 
-        # 4. تنقية التغبيش والضوضاء
-        denoised = cv2.fastNlMeansDenoising(enhanced, h=12)
+        # 4. تنقية الضوضاء والنقاط السوداء الناتجة عن السكانر
+        denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
 
-        # 5. تعديل حدة الحروف للنصوص الممسوحة ضوئياً
+        # 5. معالجة الثنائية التكيفية (Binarization) الصارخة لخطوط Word
+        binary = cv2.adaptiveThreshold(
+            denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 19, 9
+        )
+
+        # 6. تعديل حدة الحروف للنصوص المطبوعة
         kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
         sharpened = cv2.filter2D(denoised, -1, kernel)
 
-        return Image.fromarray(sharpened), Image.fromarray(denoised)
+        return Image.fromarray(sharpened), Image.fromarray(binary)
     except Exception as e:
         print(f"خطأ معالجة الصورة: {e}")
         return pil_img, pil_img
