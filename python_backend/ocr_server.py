@@ -92,6 +92,51 @@ def preprocess_arabic_document(pil_img):
         return pil_img, pil_img
 
 
+def run_abbyy_finereader_ocr(pil_img):
+    """
+    تفريغ النصوص باستخدام محرك ABBYY FineReader الشهير أوفلاين (إذا كان مثبتاً على نظام ويندوز)
+    """
+    import tempfile
+    import subprocess
+
+    possible_paths = [
+        r'C:\Program Files\ABBYY FineReader 15\FineCmd.exe',
+        r'C:\Program Files\ABBYY FineReader 16\FineCmd.exe',
+        r'C:\Program Files (x86)\ABBYY FineReader 15\FineCmd.exe',
+        r'C:\Program Files\ABBYY FineReader PDF 15\FineCmd.exe',
+        r'C:\Program Files\ABBYY FineReader PDF 16\FineCmd.exe',
+        r'C:\Program Files\ABBYY FineReader PDF\FineCmd.exe',
+        'FineCmd.exe'
+    ]
+    exe_path = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            exe_path = p
+            break
+
+    if not exe_path:
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            img_path = os.path.join(tmpdir, "doc.png")
+            txt_path = os.path.join(tmpdir, "doc.txt")
+            pil_img.save(img_path)
+
+            # استدعاء أمر ABBYY FineReader أوفلاين
+            cmd = [exe_path, img_path, "/lang", "Arabic", "English", "/out", txt_path, "/format", "text"]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+
+            if os.path.exists(txt_path):
+                with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read().strip()
+                if content and len(content) > 5:
+                    return content
+    except Exception as e:
+        print(f"تنبيه ABBYY FineReader: {e}")
+    return None
+
+
 def run_surya_ocr(pil_img):
     """
     تفريغ النصوص باستخدام محرك Surya OCR
@@ -160,7 +205,16 @@ def process_ocr():
         # معالجة الصورة بـ OpenCV
         sharpened_img, denoised_img = preprocess_arabic_document(raw_img)
 
-        # 1. التجربة الأولى: Surya OCR (المحرك المحترف للخط العربي)
+        # 1. التجربة الأولى: ABBYY FineReader (العملاق العالمي المحترف للخط العربي أوفلاين)
+        abbyy_text = run_abbyy_finereader_ocr(raw_img)
+        if abbyy_text:
+            return jsonify({
+                'success': True,
+                'text': abbyy_text,
+                'engine': 'ABBYY FineReader Engine (أعلى دقة أوفلاين للغة العربية)'
+            })
+
+        # 2. التجربة الثانية: Surya OCR (المحرك الذكي للخط العربي أوفلاين)
         if surya_rec_model is not None:
             text = run_surya_ocr(raw_img)
             if text and len(text.strip()) > 10:
