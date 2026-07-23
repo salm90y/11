@@ -189,6 +189,9 @@ def process_ocr():
         return jsonify({'status': 'ok'}), 200
 
     try:
+        print("\n" + "─" * 60)
+        print("📥 [سيرفر بايثون]: تم استلام مستند جديد لغرض الأرشفة واستخراج النص أوفلاين...")
+
         data = request.get_json(force=True)
         if not data:
             return jsonify({'error': 'لم يتم استلام أي بيانات'}), 400
@@ -208,6 +211,7 @@ def process_ocr():
         # 1. التجربة الأولى: ABBYY FineReader (العملاق العالمي المحترف للخط العربي أوفلاين)
         abbyy_text = run_abbyy_finereader_ocr(raw_img)
         if abbyy_text:
+            print("✅ [نجاح]: تم استخراج الكتاب العربي بواسطة ABBYY FineReader Engine أوفلاين!")
             return jsonify({
                 'success': True,
                 'text': abbyy_text,
@@ -218,23 +222,26 @@ def process_ocr():
         if surya_rec_model is not None:
             text = run_surya_ocr(raw_img)
             if text and len(text.strip()) > 10:
+                print("✅ [نجاح]: تم استخراج الكتاب العربي بواسطة Surya OCR أوفلاين!")
                 return jsonify({
                     'success': True,
                     'text': text,
                     'engine': 'Surya OCR (أدق محرك أوفلاين للمستندات العربية)'
                 })
 
-        # 2. التجربة الثانية: Tesseract OCR للغة العربية
+        # 3. التجربة الثالثة: Tesseract OCR للغة العربية
         tess_text = run_tesseract_ocr(sharpened_img)
         if tess_text:
+            print("✅ [نجاح]: تم استخراج النص بواسطة Tesseract Arabic OCR أوفلاين!")
             return jsonify({
                 'success': True,
                 'text': tess_text,
                 'engine': 'Tesseract Arabic OCR (أوفلاين)'
             })
 
-        # 3. التجربة الثالثة: EasyOCR مع ترتيب الأسطر والفرز من اليمين لليسار (Right to Left)
+        # 4. التجربة الرابعة: EasyOCR مع ترتيب الأسطر والفرز من اليمين لليسار (Right to Left)
         if easyocr_reader is not None:
+            print("⚙️ [جاري المعالجة]: تم تحويل الصورة لـ EasyOCR...")
             # استخراج الصناديق والتفاصيل
             img_np = np.array(raw_img)
             ocr_results = easyocr_reader.readtext(img_np, paragraph=False)
@@ -243,28 +250,22 @@ def process_ocr():
                 ocr_results = easyocr_reader.readtext(np.array(sharpened_img), paragraph=False)
 
             if ocr_results:
-                # ترتيب الأسطر من الأعلى للأسفل (Top to Bottom) ومن اليمين لليسار (Right to Left)
-                # كل نصر في ocr_results يحتوي على ([bbox], text, prob)
                 lines_dict = {}
                 for item in ocr_results:
                     bbox, text_str, prob = item[0], item[1], item[2]
                     if prob < 0.15 or not text_str.strip():
                         continue
                     
-                    # حساب منتصف الارتفاع Y وموقع X الأيمن
                     top_y = min(p[1] for p in bbox)
                     right_x = max(p[0] for p in bbox)
                     
-                    # تجميع العناصر في نفس السطر (بفارق 15 بكسل)
                     line_key = int(top_y // 18)
                     if line_key not in lines_dict:
                         lines_dict[line_key] = []
                     lines_dict[line_key].append((right_x, text_str))
 
-                # فرز الأسطر عمودياً
                 sorted_lines = []
                 for line_k in sorted(lines_dict.keys()):
-                    # فرز الكلمات داخل السطر نفسه من اليمين إلى اليسار (أكبر X أولاً)
                     words_in_line = sorted(lines_dict[line_k], key=lambda x: x[0], reverse=True)
                     line_text = " ".join(w[1] for w in words_in_line)
                     if line_text.strip():
@@ -272,6 +273,7 @@ def process_ocr():
 
                 final_text = "\n".join(sorted_lines)
                 if final_text and len(final_text.strip()) > 5:
+                    print("✅ [نجاح]: تم استخراج النص بواسطة EasyOCR مع إعادة الفرز العربي أوفلاين!")
                     return jsonify({
                         'success': True,
                         'text': final_text,
