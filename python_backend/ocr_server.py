@@ -179,20 +179,50 @@ def process_ocr():
                 'engine': 'Tesseract Arabic OCR (أوفلاين)'
             })
 
-        # 3. التجربة الثالثة: EasyOCR مع معالجة الصورة
+        # 3. التجربة الثالثة: EasyOCR مع ترتيب الأسطر والفرز من اليمين لليسار (Right to Left)
         if easyocr_reader is not None:
-            img_np = np.array(sharpened_img)
-            results = easyocr_reader.readtext(img_np, detail=0, paragraph=True)
-            if not results:
-                results = easyocr_reader.readtext(np.array(raw_img), detail=0, paragraph=True)
+            # استخراج الصناديق والتفاصيل
+            img_np = np.array(raw_img)
+            ocr_results = easyocr_reader.readtext(img_np, paragraph=False)
             
-            final_text = "\n".join(results)
-            if final_text and len(final_text.strip()) > 5:
-                return jsonify({
-                    'success': True,
-                    'text': final_text,
-                    'engine': 'EasyOCR + OpenCV Processing (أوفلاين)'
-                })
+            if not ocr_results:
+                ocr_results = easyocr_reader.readtext(np.array(sharpened_img), paragraph=False)
+
+            if ocr_results:
+                # ترتيب الأسطر من الأعلى للأسفل (Top to Bottom) ومن اليمين لليسار (Right to Left)
+                # كل نصر في ocr_results يحتوي على ([bbox], text, prob)
+                lines_dict = {}
+                for item in ocr_results:
+                    bbox, text_str, prob = item[0], item[1], item[2]
+                    if prob < 0.15 or not text_str.strip():
+                        continue
+                    
+                    # حساب منتصف الارتفاع Y وموقع X الأيمن
+                    top_y = min(p[1] for p in bbox)
+                    right_x = max(p[0] for p in bbox)
+                    
+                    # تجميع العناصر في نفس السطر (بفارق 15 بكسل)
+                    line_key = int(top_y // 18)
+                    if line_key not in lines_dict:
+                        lines_dict[line_key] = []
+                    lines_dict[line_key].append((right_x, text_str))
+
+                # فرز الأسطر عمودياً
+                sorted_lines = []
+                for line_k in sorted(lines_dict.keys()):
+                    # فرز الكلمات داخل السطر نفسه من اليمين إلى اليسار (أكبر X أولاً)
+                    words_in_line = sorted(lines_dict[line_k], key=lambda x: x[0], reverse=True)
+                    line_text = " ".join(w[1] for w in words_in_line)
+                    if line_text.strip():
+                        sorted_lines.append(line_text)
+
+                final_text = "\n".join(sorted_lines)
+                if final_text and len(final_text.strip()) > 5:
+                    return jsonify({
+                        'success': True,
+                        'text': final_text,
+                        'engine': 'EasyOCR + RTL Line Sorting (أوفلاين)'
+                    })
 
         # 4. التجربة الرابعة: PaddleOCR
         if paddle_ocr is not None:
