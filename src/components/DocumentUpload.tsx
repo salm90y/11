@@ -244,31 +244,35 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                       استخراج النصوص (OCR)
                     </h4>
                     {ocrResult && (
-                      <button
-                        onClick={handleCopy}
-                        className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 rounded-lg transition-colors"
-                        title="نسخ النص المفرغ"
-                      >
-                        {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                        <span>{copied ? 'تم النسخ!' : 'نسخ'}</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleCopy}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 rounded-lg transition-colors shadow-sm"
+                          title="نسخ النص المفرغ"
+                        >
+                          {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                          <span>{copied ? 'تم النسخ!' : 'نسخ النص'}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const blob = new Blob([ocrResult.text], { type: 'text/plain;charset=utf-8' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${docTitle || 'document'}_arabic_text.txt`;
+                            a.click();
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-xs text-white font-medium rounded-lg transition-colors shadow-sm"
+                          title="تنزيل كملف نصي للوورد"
+                        >
+                          <span>تحميل للوورد (Word TXT)</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
                   {/* اختيار محرك المعالجة */}
                   <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => setOcrEngine('gemini')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-                        ocrEngine === 'gemini'
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                      }`}
-                    >
-                      <Sparkles size={14} />
-                      <span>الذكاء الاصطناعي (دقة 99.9%)</span>
-                    </button>
                     <button
                       type="button"
                       onClick={() => setOcrEngine('python')}
@@ -279,11 +283,24 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                       }`}
                     >
                       <Server size={14} />
-                      <span>سيرفر بايثون (Offline)</span>
+                      <span>سيرفر بايثون (Offline 100%)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOcrEngine('gemini')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                        ocrEngine === 'gemini'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Sparkles size={14} />
+                      <span>الذكاء الاصطناعي أونلاين (99.9%)</span>
                     </button>
                   </div>
 
-                  <div className="h-64 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative group border border-slate-800">
+                  {/* صندوق استعراض النص المفرغ بخط الوورد العربي */}
+                  <div className="h-72 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative group border border-slate-800">
                     <AnimatePresence mode="wait">
                       {isProcessing ? (
                         <motion.div 
@@ -297,7 +314,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           <p className="text-sm font-semibold">
                             {ocrEngine === 'gemini'
                               ? 'جاري استخراج النصوص بالذكاء الاصطناعي الفائق...'
-                              : 'جاري الاتصال بسيرفر بايثون المحلي (localhost:5000)...'}
+                              : 'جاري معالجة الصورة بـ OpenCV وتنقية الخطوط أوفلاين...'}
                           </p>
                           <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                             <div 
@@ -314,27 +331,36 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           className="space-y-3"
                         >
                           {ocrResult.engine && (
-                            <div className="inline-block px-2.5 py-0.5 bg-blue-950 text-blue-300 text-[11px] font-semibold rounded-md border border-blue-800/50">
-                              المحرك المستخدَم: {ocrResult.engine}
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="px-2.5 py-0.5 bg-blue-950 text-blue-300 text-[11px] font-semibold rounded-md border border-blue-800/50">
+                                المحرك المستخدَم: {ocrResult.engine}
+                              </span>
+                              <span className="text-[11px] text-slate-400">
+                                خط الوورد الافتراضي (Traditional Arabic)
+                              </span>
                             </div>
                           )}
-                          <div className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                          <div 
+                            className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif tracking-normal text-right p-2 bg-slate-950/60 rounded-xl border border-slate-800/80"
+                            style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
+                            dir="rtl"
+                          >
                             {ocrResult.text}
                           </div>
                         </motion.div>
                       ) : (
                         <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3 text-center p-4">
                           <p className="text-xs text-slate-400">
-                            {ocrEngine === 'gemini' 
-                              ? '⚡ المحرك الموصى به: يستخرج الكتاب الرسمي بنسبة دقة 99.9% مع التنسيق والتواريخ والأسماء.'
-                              : '🖥️ يتطلب تشغيل ملف python ocr_server.py على جهازك محلياً.'}
+                            {ocrEngine === 'python'
+                              ? '🖥️ معالجة حاسوبية متقدمة (OpenCV) لتوضيح الحروف وتعديل الميلان وتصحيح العبارات الرسمية.'
+                              : '⚡ محرك أونلاين يستخرج الكتاب الرسمي بدقة 99.9%.'}
                           </p>
                           <button 
                             onClick={processOCR}
                             className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-500 shadow-md transition-all flex items-center gap-2 active:scale-95"
                           >
                             <Sparkles size={16} />
-                            بدء القراءة الذكية للمستند
+                            بدء القراءة واستخراج النص
                           </button>
                         </div>
                       )}
