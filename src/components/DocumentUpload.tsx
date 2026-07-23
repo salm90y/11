@@ -89,7 +89,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     setProgress(0);
     
     try {
-      const worker = await createWorker('ara', 1, {
+      const worker = await createWorker('ara+eng', 1, {
         logger: m => {
           if (m.status === 'recognizing text') {
             setProgress(Math.round(m.progress * 100));
