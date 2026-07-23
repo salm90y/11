@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
 import { Document, DocumentCategory } from '../types';
+import { normalizeAndCorrectArabicText } from '../utils/arabicPostProcessor';
 
 interface DocumentUploadProps {
   onUploadSuccess: (doc: Document) => void;
@@ -95,38 +96,62 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     
     try {
       const base64Data = preview.split(',')[1];
-      let apiUrl = '/api/ocr';
-      if (ocrEngine === 'python') {
-        apiUrl = 'http://127.0.0.1:5000/api/ocr';
-      }
+      let apiUrl = ocrEngine === 'python' ? 'http://127.0.0.1:5000/api/ocr' : '/api/ocr';
 
-      setProgress(50);
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image_base64: base64Data,
-          image: base64Data,
-          fileData: base64Data
-        })
-      });
+      setProgress(40);
+      let response: Response;
+      let usedEngineName = ocrEngine === 'gemini' ? 'Gemini Vision AI + القاموس العربي' : 'سيرفر بايثون المحلي';
+
+      try {
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_base64: base64Data,
+            image: base64Data,
+            fileData: base64Data
+          })
+        });
+
+        if (!response.ok && ocrEngine === 'python') {
+          throw new Error('Python server error');
+        }
+      } catch (err) {
+        // إذا فشل الاتصال بسيرفر بايثون المحلي، التحول التلقائي للمحرك المتقدم
+        if (ocrEngine === 'python') {
+          console.warn('سيرفر بايثون غير متصل، جاري التحويل لمحرك الذكاء الاصطناعي الفائق أونلاين...');
+          response = await fetch('/api/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image_base64: base64Data,
+              image: base64Data,
+              fileData: base64Data
+            })
+          });
+          usedEngineName = 'الذكاء الاصطناعي (تحويل تلقائي + المعجم العربي)';
+        } else {
+          throw err;
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `خطأ السيرفر: ${response.status}`);
       }
 
-      setProgress(90);
+      setProgress(85);
       const data = await response.json();
       
-      const text = data.text || '';
-      const usedEngine = data.engine || (ocrEngine === 'gemini' ? 'Gemini Vision AI' : 'Python OCR');
+      const rawText = data.text || '';
+      // معالجة القاموس والتصحيح العربي المحلي
+      const correctedText = normalizeAndCorrectArabicText(rawText);
+      const finalEngine = data.engine || usedEngineName;
+      
       setProgress(100);
       
-      const category = classifyText(text);
-      setOcrResult({ text, category, engine: usedEngine });
+      const category = classifyText(correctedText);
+      setOcrResult({ text: correctedText, category, engine: finalEngine });
     } catch (error: any) {
       console.error('OCR Error:', error);
       alert(`حدث خطأ أثناء معالجة المستند:\n${error.message || 'خطأ غير معروف'}`);

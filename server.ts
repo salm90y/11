@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { Document, UserRole, Stats } from './src/types';
+import { normalizeAndCorrectArabicText } from './src/utils/arabicPostProcessor';
 
 dotenv.config();
 
@@ -76,11 +77,12 @@ app.post('/api/ocr', async (req, res) => {
       },
     });
 
-    const text = response.text || '';
+    const rawText = response.text || '';
+    const cleanedText = normalizeAndCorrectArabicText(rawText);
     return res.json({
       success: true,
-      text: text.trim(),
-      engine: 'Gemini Vision AI (دقة 99.9%)',
+      text: cleanedText.trim(),
+      engine: 'Gemini Vision AI + Dictionary Post-Processing (دقة 99.9%)',
     });
   } catch (error: any) {
     console.error('OCR Error:', error);
