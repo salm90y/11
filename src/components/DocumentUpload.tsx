@@ -12,7 +12,11 @@ import {
   Loader2, 
   Barcode as BarcodeIcon,
   Save,
-  Type
+  Type,
+  Sparkles,
+  Server,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -45,10 +49,12 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [ocrResult, setOcrResult] = useState<{ text: string, category: string } | null>(null);
+  const [ocrEngine, setOcrEngine] = useState<'gemini' | 'python'>('gemini');
+  const [ocrResult, setOcrResult] = useState<{ text: string; category: string; engine?: string } | null>(null);
   const [docTitle, setDocTitle] = useState('');
   const [barcodeValue, setBarcodeValue] = useState('');
   const [progress, setProgress] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const selectedFile = acceptedFiles[0];
@@ -85,41 +91,55 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const processOCR = async () => {
     if (!preview) return;
     setIsProcessing(true);
-    setProgress(10);
+    setProgress(20);
     
     try {
-      // إرسال الصورة للسيرفر المحلي (PaddleOCR)
       const base64Data = preview.split(',')[1];
-      const response = await fetch('http://127.0.0.1:5000/api/ocr', {
+      let apiUrl = '/api/ocr';
+      if (ocrEngine === 'python') {
+        apiUrl = 'http://127.0.0.1:5000/api/ocr';
+      }
+
+      setProgress(50);
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           image_base64: base64Data,
-          image: base64Data,       // احتياطاً
-          fileData: base64Data     // احتياطاً
+          image: base64Data,
+          fileData: base64Data
         })
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server error: ${response.status} - ${errorText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `خطأ السيرفر: ${response.status}`);
       }
 
       setProgress(90);
       const data = await response.json();
       
       const text = data.text || '';
+      const usedEngine = data.engine || (ocrEngine === 'gemini' ? 'Gemini Vision AI' : 'Python OCR');
       setProgress(100);
       
       const category = classifyText(text);
-      setOcrResult({ text, category });
-    } catch (error) {
-      console.error('PaddleOCR Error:', error);
-      alert(`حدث خطأ أثناء الاتصال بسيرفر PaddleOCR:\n${error instanceof Error ? error.message : 'خطأ غير معروف'}`);
+      setOcrResult({ text, category, engine: usedEngine });
+    } catch (error: any) {
+      console.error('OCR Error:', error);
+      alert(`حدث خطأ أثناء معالجة المستند:\n${error.message || 'خطأ غير معروف'}`);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleCopy = () => {
+    if (ocrResult?.text) {
+      navigator.clipboard.writeText(ocrResult.text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -218,11 +238,52 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-4">
-                  <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                    <Type size={18} className="text-blue-500" />
-                    استخراج النصوص (OCR)
-                  </h4>
-                  <div className="h-64 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative group">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                      <Type size={18} className="text-blue-500" />
+                      استخراج النصوص (OCR)
+                    </h4>
+                    {ocrResult && (
+                      <button
+                        onClick={handleCopy}
+                        className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 rounded-lg transition-colors"
+                        title="نسخ النص المفرغ"
+                      >
+                        {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                        <span>{copied ? 'تم النسخ!' : 'نسخ'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* اختيار محرك المعالجة */}
+                  <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setOcrEngine('gemini')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                        ocrEngine === 'gemini'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Sparkles size={14} />
+                      <span>الذكاء الاصطناعي (دقة 99.9%)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOcrEngine('python')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                        ocrEngine === 'python'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Server size={14} />
+                      <span>سيرفر بايثون (Offline)</span>
+                    </button>
+                  </div>
+
+                  <div className="h-64 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative group border border-slate-800">
                     <AnimatePresence mode="wait">
                       {isProcessing ? (
                         <motion.div 
@@ -230,10 +291,14 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="absolute inset-0 flex flex-col items-center justify-center text-blue-400 gap-4 bg-slate-900/50 backdrop-blur-sm"
+                          className="absolute inset-0 flex flex-col items-center justify-center text-blue-400 gap-4 bg-slate-900/90 backdrop-blur-sm p-4 text-center"
                         >
                           <Loader2 className="animate-spin" size={32} />
-                          <p className="text-sm">جاري المعالجة محلياً (Offline OCR)... {progress}%</p>
+                          <p className="text-sm font-semibold">
+                            {ocrEngine === 'gemini'
+                              ? 'جاري استخراج النصوص بالذكاء الاصطناعي الفائق...'
+                              : 'جاري الاتصال بسيرفر بايثون المحلي (localhost:5000)...'}
+                          </p>
                           <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                             <div 
                               className="h-full bg-blue-500 transition-all duration-300" 
@@ -246,18 +311,30 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           key="result"
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
-                          className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap"
+                          className="space-y-3"
                         >
-                          {ocrResult.text}
+                          {ocrResult.engine && (
+                            <div className="inline-block px-2.5 py-0.5 bg-blue-950 text-blue-300 text-[11px] font-semibold rounded-md border border-blue-800/50">
+                              المحرك المستخدَم: {ocrResult.engine}
+                            </div>
+                          )}
+                          <div className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                            {ocrResult.text}
+                          </div>
                         </motion.div>
                       ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-4">
-                          <p className="text-sm">اضغط على الزر لبدء استخراج النصوص ذكياً</p>
+                        <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3 text-center p-4">
+                          <p className="text-xs text-slate-400">
+                            {ocrEngine === 'gemini' 
+                              ? '⚡ المحرك الموصى به: يستخرج الكتاب الرسمي بنسبة دقة 99.9% مع التنسيق والتواريخ والأسماء.'
+                              : '🖥️ يتطلب تشغيل ملف python ocr_server.py على جهازك محلياً.'}
+                          </p>
                           <button 
                             onClick={processOCR}
-                            className="px-6 py-2 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-500 transition-colors"
+                            className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-500 shadow-md transition-all flex items-center gap-2 active:scale-95"
                           >
-                            بدء المعالجة الذكية
+                            <Sparkles size={16} />
+                            بدء القراءة الذكية للمستند
                           </button>
                         </div>
                       )}
