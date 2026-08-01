@@ -710,6 +710,28 @@ def process_ocr():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/refine-text', methods=['POST', 'OPTIONS'])
+def refine_text_api():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    try:
+        data = request.get_json(force=True)
+        if not data or 'text' not in data:
+            return jsonify({'error': 'لم يتم توفير نص للتنقيح'}), 400
+
+        input_text = data.get('text', '')
+        refined_text = apply_nlp_legal_refiner(input_text)
+
+        return jsonify({
+            'success': True,
+            'text': refined_text,
+            'method': 'المعالج اللغوي والمورفولوجي الأوفلاين (Offline Tatweel & Legal NLP Engine)'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("=" * 75)
     print("🌐 سيرفر النماذج متعددة المراحل يعمل أوفلاين على: http://127.0.0.1:5000")

@@ -96,6 +96,75 @@ app.post('/api/ocr', async (req, res) => {
   }
 });
 
+// AI Text Refinement & Proofreading Endpoint
+app.post('/api/refine-text', async (req, res) => {
+  try {
+    const { text, mode } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'لم يتم توفير أي نص للتنقيح' });
+    }
+
+    // Offline mode or fallback if no key
+    if (mode === 'offline' || !process.env.GEMINI_API_KEY) {
+      const refined = normalizeAndCorrectArabicText(text);
+      return res.json({
+        success: true,
+        text: refined,
+        method: 'المعالج اللغوي المورفولوجي الأوفلاين (Tatweel & Legal NLP Engine)'
+      });
+    }
+
+    // AI Refinement using Gemini AI Model
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية.
+
+قم بتقديم أفضل تنقيح وتصحيح كامل للنص التالي لإنهاء كافة المشاكل والأخطاء الإملائية والتركيبية:
+
+1. تصحيح الحروف والكلمات المشوهة بسبب مد الحروف (الكشيدة) مثل استبدال "تساريخ" بـ "تاريخ"، "المحسال" بـ "المحال"، "السى التقاعد" بـ "إلى التقاعد"، "تقيسده" بـ "تقيده"، "المهنسي" بـ "المهني"، "بقواعسد" بـ "بقواعد".
+2. تجميع الحروف العربية المتباعدة والمقطوعة داخل الكلمة الواحدة (مثل "بقواع د" -> "بقواعد"، "حس ين" -> "حسين"، "تقا عد" -> "تقاعد").
+3. فصل الكلمات المدمجة الملتصقة بدون مسافات (مثل "حسينكاملجابرشمخي" -> "حسين كامل جابر شمخي"، "تاريخانفكاك" -> "تاريخ انفكاك").
+4. تصحيح وتصويب أسماء الوزارات والمديريات والمواد والقوانين والتشريعات العراقية والرسمية (مثل "قانون أصول المحاكمات الجزائية لقوى الأمن الداخلي رقم (17) لسنة 2008").
+5. الحفاظ التام على أسلوب وهيكلية الكتاب الرسمي وحقول الترويسة والعدد والتاريخ والجدول والتذييل دون حذف أو تلخيص.
+6. اكتب النص المنقح النهائي المصحح بالكامل فقط، بدون أي مقدمات أو شرح أو حواشي.
+
+النص المطلوب تنقيحه وتعديله:
+---
+${text}
+---`
+            }
+          ]
+        }
+      ]
+    });
+
+    const aiRefinedText = response.text ? response.text.trim() : text;
+    // Final polish with local rules
+    const finalPolished = normalizeAndCorrectArabicText(aiRefinedText);
+
+    return res.json({
+      success: true,
+      text: finalPolished,
+      method: 'نموذج الذكاء الاصطناعي الفائق (Gemini AI Refinement Engine)'
+    });
+  } catch (error: any) {
+    console.error('Refine Text Error:', error);
+    // Fallback to local offline postprocessor
+    const fallbackText = normalizeAndCorrectArabicText(req.body.text || '');
+    return res.json({
+      success: true,
+      text: fallbackText,
+      method: 'المعالج المورفولوجي المحلي (Fallback Offline Engine)',
+      warning: 'تم التنقيح بالمحرك المحلي نظراً لتعذر الاتصال بالسيرفر'
+    });
+  }
+});
+
 // Documents API
 app.get('/api/documents', (req, res) => {
   res.json(db.documents);

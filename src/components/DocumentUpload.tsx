@@ -16,7 +16,10 @@ import {
   Sparkles,
   Server,
   Copy,
-  Check
+  Check,
+  Wand2,
+  CheckCircle2,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -63,6 +66,71 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const [barcodeValue, setBarcodeValue] = useState('');
   const [progress, setProgress] = useState(0);
   const [copied, setCopied] = useState(false);
+
+  // حالة أداة تنقيح وتعديل النص بالذكاء الاصطناعي
+  const [isRefining, setIsRefining] = useState(false);
+  const [isRefined, setIsRefined] = useState(false);
+  const [refinementMethod, setRefinementMethod] = useState<string | null>(null);
+  const [originalUnrefinedText, setOriginalUnrefinedText] = useState<string | null>(null);
+
+  const handleRefineText = async (mode: 'ai' | 'offline' = 'ai') => {
+    if (!ocrResult?.text) return;
+    setIsRefining(true);
+    try {
+      if (!originalUnrefinedText) {
+        setOriginalUnrefinedText(ocrResult.text);
+      }
+
+      const apiUrl = ocrEngine === 'python' && mode === 'offline' 
+        ? 'http://127.0.0.1:5000/api/refine-text' 
+        : '/api/refine-text';
+
+      let res: Response;
+      try {
+        res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: ocrResult.text,
+            mode
+          })
+        });
+      } catch (e) {
+        res = await fetch('/api/refine-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: ocrResult.text,
+            mode
+          })
+        });
+      }
+
+      if (!res.ok) {
+        throw new Error('فشل طلب تنقيح وتعديل النص');
+      }
+
+      const data = await res.json();
+      if (data.success && data.text) {
+        setOcrResult(prev => prev ? { ...prev, text: data.text } : null);
+        setIsRefined(true);
+        setRefinementMethod(data.method || (mode === 'ai' ? 'تنقيح بالذكاء الاصطناعي (Gemini)' : 'تنقيح لغوي مورفولوجي أوفلاين'));
+      }
+    } catch (err: any) {
+      console.error('Refine error:', err);
+      alert(`فشل تنقيح النص: ${err.message || 'حدث خطأ'}`);
+    } finally {
+      setIsRefining(false);
+    }
+  };
+
+  const handleUndoRefinement = () => {
+    if (originalUnrefinedText && ocrResult) {
+      setOcrResult({ ...ocrResult, text: originalUnrefinedText });
+      setIsRefined(false);
+      setRefinementMethod(null);
+    }
+  };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const selectedFile = acceptedFiles[0];
@@ -221,6 +289,9 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     setOcrResult(null);
     setDocTitle('');
     setBarcodeValue('');
+    setIsRefined(false);
+    setRefinementMethod(null);
+    setOriginalUnrefinedText(null);
   };
 
   return (
@@ -412,10 +483,16 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           )}
 
                           <div 
-                            className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif tracking-normal text-right p-2 bg-slate-950/60 rounded-xl border border-slate-800/80"
+                            className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif tracking-normal text-right p-2 bg-slate-950/60 rounded-xl border border-slate-800/80 relative"
                             style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
                             dir="rtl"
                           >
+                            {isRefining && (
+                              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-blue-400 gap-2 z-10">
+                                <Loader2 size={28} className="animate-spin text-blue-500" />
+                                <span className="text-xs font-bold text-white">جاري تنقيح وتعديل النص بالذكاء الاصطناعي وتصحيح الكشيدة والأسماء...</span>
+                              </div>
+                            )}
                             {ocrResult.text}
                           </div>
                         </motion.div>
@@ -437,6 +514,72 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                       )}
                     </AnimatePresence>
                   </div>
+
+                  {/* شريط زر تنقيح وتعديل النص بالذكاء الاصطناعي (يظهر بعد استخراج النص بالكامل) */}
+                  {ocrResult && !isProcessing && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl border border-blue-800/60 shadow-lg space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/30 shadow-inner">
+                            <Wand2 size={18} className="animate-pulse text-amber-300" />
+                          </div>
+                          <div>
+                            <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <span>أداة تنقيح وتعديل النص بالذكاء الاصطناعي</span>
+                              {isRefined && (
+                                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-full border border-emerald-500/40 flex items-center gap-1">
+                                  <CheckCircle2 size={11} /> تم تنقيح وتعديل النص بنجاح
+                                </span>
+                              )}
+                            </h5>
+                            <p className="text-[11px] text-slate-300 mt-0.5">
+                              {isRefined && refinementMethod
+                                ? `طريقة المعالجة والتنقيح: ${refinementMethod}`
+                                : 'تصحّح أخطاء مد الحروف (سس)، الكلمات الملتصقة، الحروف المفككة، والأسماء المكتوبة بالخط الرقعي/الإداري.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {isRefined && originalUnrefinedText && (
+                            <button
+                              onClick={handleUndoRefinement}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl border border-slate-700 transition-colors shadow-sm"
+                              title="التراجع إلى النص المستخرج الأصلي"
+                            >
+                              <RotateCcw size={13} />
+                              <span>تراجع للأصلي</span>
+                            </button>
+                          )}
+                          <button
+                            disabled={isRefining}
+                            onClick={() => handleRefineText('offline')}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all shadow-sm disabled:opacity-50"
+                            title="تنقيح سريع بدون إنترنت باستخدام المعجم المورفولوجي والقانوني المحلي"
+                          >
+                            <Server size={13} className="text-blue-400" />
+                            <span>تنقيح أوفلاين</span>
+                          </button>
+                          <button
+                            disabled={isRefining}
+                            onClick={() => handleRefineText('ai')}
+                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50 border border-blue-400/30"
+                          >
+                            {isRefining ? (
+                              <Loader2 size={15} className="animate-spin" />
+                            ) : (
+                              <Wand2 size={15} className="text-amber-300" />
+                            )}
+                            <span>✨ تنقيح وتعديل النص بالذكاء الاصطناعي</span>
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
 
                 <div className="space-y-4 text-center flex flex-col items-center justify-center border border-slate-100 rounded-2xl p-6 bg-slate-50/30">
