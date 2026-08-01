@@ -84,6 +84,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const [activeIdx, setActiveIdx] = useState<number>(-1);
   const [copied, setCopied] = useState(false);
 
+  // كشف ما إذا كان التطبيق يعمل على خادم سحابي لمعاينة AI Studio
+  const isCloudPreview = typeof window !== 'undefined' && 
+    window.location.hostname !== 'localhost' && 
+    window.location.hostname !== '127.0.0.1';
+
   // إعدادات Ollama للتدقيق اللغوي الأوفلاين
   const [ollamaModel, setOllamaModel] = useState(() => localStorage.getItem('ollamaModel') || 'qwen2.5');
   const [ollamaHost, setOllamaHost] = useState(() => localStorage.getItem('ollamaHost') || 'http://127.0.0.1:11434');
@@ -908,9 +913,30 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                               className="overflow-hidden border-t border-slate-800/80 pt-3 space-y-3"
                             >
                               {ollamaError && (
-                                <div className="p-2.5 bg-red-950/40 border border-red-850 rounded-xl text-red-200 text-xs">
-                                  <p className="font-bold mb-1">⚠️ خطأ Ollama:</p>
-                                  <p>{ollamaError}</p>
+                                <div className="p-4 bg-red-950/50 border border-red-800 rounded-2xl text-red-100 text-xs leading-relaxed space-y-2 text-right">
+                                  <p className="font-bold text-sm text-red-300 flex items-center gap-1.5">
+                                    <span>⚠️ فشل ربط نموذج Ollama المحلي:</span>
+                                  </p>
+                                  <p className="text-red-200 bg-red-950/40 p-2.5 rounded-xl border border-red-900/30 whitespace-pre-wrap leading-relaxed">
+                                    {ollamaError}
+                                  </p>
+                                  {isCloudPreview && (
+                                    <div className="mt-3 pt-3 border-t border-red-900/45 space-y-2 text-slate-300">
+                                      <p className="font-bold text-amber-300">💡 تنبيه هام لبيئة المعاينة السحابية (Cloud Preview):</p>
+                                      <p>
+                                        بما أنك تستخدم تطبيق المعاينة السحابية حالياً، فإن السيرفر الذي يشغّل التطبيق موجود في السحاب ولا يمكنه الوصول مباشرة لخدمة 
+                                        <code className="bg-slate-900 px-1 py-0.5 rounded mx-1 text-white">localhost (127.0.0.1)</code> 
+                                        المثبتة على حاسوبك الشخصي.
+                                      </p>
+                                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-slate-300 space-y-1">
+                                        <p className="font-semibold text-white">لحل هذه المشكلة وتفعيل ميزة Ollama أوفلاين بالكامل:</p>
+                                        <ul className="list-disc list-inside space-y-1.5 text-slate-300">
+                                          <li><span className="text-white font-medium">الخيار 1 (الموصى به والأفضل):</span> قم بتنزيل المشروع كملف <span className="text-blue-300 font-bold">ZIP</span> أو تصديره إلى <span className="text-blue-300 font-bold">GitHub</span> وتشغيله محلياً بالكامل على حاسوبك. سيعمل الربط تلقائياً 100% دون أي قيود سحابية!</li>
+                                          <li><span className="text-white font-medium">الخيار 2 (في هذه المعاينة):</span> يمكنك استخدام زر <span className="text-amber-300 font-bold">✨ تنقيح (Gemini)</span> المتاح بجانبه، والذي يعتمد على السحاب ومُعد وجاهز للاستخدام مباشرة في هذه المعاينة بنجاح فوري.</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
