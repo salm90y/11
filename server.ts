@@ -248,6 +248,18 @@ app.post('/api/documents', (req, res) => {
   res.json({ success: true, doc });
 });
 
+app.put('/api/documents/:id', (req, res) => {
+  const { id } = req.params;
+  const { extractedText, title } = req.body;
+  const doc = db.documents.find(d => d.id === id);
+  if (doc) {
+    if (extractedText !== undefined) doc.extractedText = extractedText;
+    if (title !== undefined) doc.title = title;
+    return res.json({ success: true, doc });
+  }
+  return res.status(404).json({ error: 'المستند غير موجود' });
+});
+
 app.delete('/api/documents/:id', (req, res) => {
   const { id } = req.params;
   db.documents = db.documents.filter(d => d.id !== id);

@@ -22,7 +22,9 @@ import {
   RotateCcw,
   Cpu,
   Settings,
-  HelpCircle
+  HelpCircle,
+  Edit3,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -31,6 +33,30 @@ import { normalizeAndCorrectArabicText } from '../utils/arabicPostProcessor';
 
 interface DocumentUploadProps {
   onUploadSuccess: (doc: Document) => void;
+}
+
+interface UploadQueueItem {
+  id: string;
+  file: File;
+  preview: string;
+  title: string;
+  barcodeValue: string;
+  ocrResult: { 
+    text: string; 
+    category: string; 
+    engine?: string;
+    stages?: Array<{ stage: number; title: string; details: string }>;
+    enhancedImage?: string;
+  } | null;
+  isProcessing: boolean;
+  progress: number;
+  isRefining: boolean;
+  isRefined: boolean;
+  refinementMethod: string | null;
+  originalUnrefinedText: string | null;
+  isEditingManually: boolean;
+  showEnhancedPreview: boolean;
+  ocrEngine: 'python' | 'gemini';
 }
 
 const CLASSIFICATION_KEYWORDS: Record<DocumentCategory, string[]> = {
@@ -53,34 +79,18 @@ const CLASSIFICATION_KEYWORDS: Record<DocumentCategory, string[]> = {
 };
 
 export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [ocrEngine, setOcrEngine] = useState<'gemini' | 'python'>('python');
-  const [ocrResult, setOcrResult] = useState<{ 
-    text: string; 
-    category: string; 
-    engine?: string;
-    stages?: Array<{ stage: number; title: string; details: string }>;
-    enhancedImage?: string;
-  } | null>(null);
-  const [showEnhancedPreview, setShowEnhancedPreview] = useState(false);
-  const [docTitle, setDocTitle] = useState('');
-  const [barcodeValue, setBarcodeValue] = useState('');
-  const [progress, setProgress] = useState(0);
+  // طابور رفع المستندات المتعددة
+  const [queue, setQueue] = useState<UploadQueueItem[]>([]);
+  const [activeIdx, setActiveIdx] = useState<number>(-1);
   const [copied, setCopied] = useState(false);
 
-  // حالة أداة تنقيح وتعديل النص بالذكاء الاصطناعي
-  const [isRefining, setIsRefining] = useState(false);
-  const [isRefined, setIsRefined] = useState(false);
-  const [refinementMethod, setRefinementMethod] = useState<string | null>(null);
-  const [originalUnrefinedText, setOriginalUnrefinedText] = useState<string | null>(null);
-
-  // إعدادات Ollama للتدقيق الأوفلاين المحلي
+  // إعدادات Ollama للتدقيق اللغوي الأوفلاين
   const [ollamaModel, setOllamaModel] = useState(() => localStorage.getItem('ollamaModel') || 'qwen2.5');
   const [ollamaHost, setOllamaHost] = useState(() => localStorage.getItem('ollamaHost') || 'http://127.0.0.1:11434');
   const [showOllamaSettings, setShowOllamaSettings] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
+
+  const activeDoc = activeIdx >= 0 && activeIdx < queue.length ? queue[activeIdx] : null;
 
   const handleOllamaModelChange = (val: string) => {
     setOllamaModel(val);
@@ -92,24 +102,41 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     localStorage.setItem('ollamaHost', val);
   };
 
+  // دالة مساعدة لتحديث خواص أي ملف في الطابور
+  const updateQueueItem = (id: string, updates: Partial<UploadQueueItem>) => {
+    setQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+  };
+
+  // دالة تصنيف النصوص الذكية
+  const classifyText = (text: string): DocumentCategory => {
+    for (const [category, keywords] of Object.entries(CLASSIFICATION_KEYWORDS)) {
+      if (keywords.some(keyword => text.includes(keyword))) {
+        return category as DocumentCategory;
+      }
+    }
+    return DocumentCategory.OTHER;
+  };
+
+  // تدقيق Ollama للوثيقة النشطة
   const handleOllamaRefine = async () => {
-    if (!ocrResult?.text) return;
-    setIsRefining(true);
+    if (!activeDoc || !activeDoc.ocrResult?.text) return;
+    
+    updateQueueItem(activeDoc.id, { isRefining: true });
     setOllamaError(null);
     try {
-      if (!originalUnrefinedText) {
-        setOriginalUnrefinedText(ocrResult.text);
+      if (!activeDoc.originalUnrefinedText) {
+        updateQueueItem(activeDoc.id, { originalUnrefinedText: activeDoc.ocrResult.text });
       }
 
       let res: Response | null = null;
       const payload = {
-        text: ocrResult.text,
+        text: activeDoc.ocrResult.text,
         model: ollamaModel,
         host: ollamaHost
       };
 
       try {
-        const url = ocrEngine === 'python' 
+        const url = activeDoc.ocrEngine === 'python' 
           ? 'http://127.0.0.1:5000/api/ollama-refine' 
           : '/api/ollama-refine';
 
@@ -119,7 +146,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           body: JSON.stringify(payload)
         });
       } catch (err) {
-        // Fallback to node backend proxy
+        // الاتصال المباشر بـ Node Backend proxy
         try {
           res = await fetch('/api/ollama-refine', {
             method: 'POST',
@@ -127,14 +154,14 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
             body: JSON.stringify(payload)
           });
         } catch (err2) {
-          // Direct fetch
+          // جلب مباشر من المضيف
           try {
             res = await fetch(`${ollamaHost}/api/generate`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 model: ollamaModel,
-                prompt: `أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية. قم بتقديم تصحيح وتدقيق لغوي كامل ومطابقة الكلمات مع أصولها العربية الفصحى. اكتب النص النهائي المصحح بالكامل فقط، وبدون أي مقدمات أو شرح.\n\nالنص المطلوب تدقيقه:\n${ocrResult.text}`,
+                prompt: `أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية. قم بتقديم تصحيح وتدقيق لغوي كامل ومطابقة الكلمات مع أصولها العربية الفصحى. اكتب النص النهائي المصحح بالكامل فقط، وبدون أي مقدمات أو شرح.\n\nالنص المطلوب تدقيقه:\n${activeDoc.ocrResult.text}`,
                 stream: false
               })
             });
@@ -150,9 +177,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
 
       const data = await res.json();
       if (data.success && data.text) {
-        setOcrResult(prev => prev ? { ...prev, text: data.text } : null);
-        setIsRefined(true);
-        setRefinementMethod(data.method || `نموذج Ollama المحلي أوفلاين (${ollamaModel})`);
+        updateQueueItem(activeDoc.id, {
+          ocrResult: { ...activeDoc.ocrResult, text: data.text },
+          isRefined: true,
+          refinementMethod: data.method || `نموذج Ollama المحلي أوفلاين (${ollamaModel})`
+        });
       } else {
         throw new Error(data.error || 'حدث خطأ غير معروف أثناء التدقيق بـ Ollama');
       }
@@ -160,19 +189,21 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       console.error('Ollama Refine error:', err);
       setOllamaError(err.message || 'فشل الاتصال بـ Ollama');
     } finally {
-      setIsRefining(false);
+      updateQueueItem(activeDoc.id, { isRefining: false });
     }
   };
 
+  // تنقيح وتصحيح النص (Gemini / معجم محلي) للوثيقة النشطة
   const handleRefineText = async (mode: 'ai' | 'offline' = 'ai') => {
-    if (!ocrResult?.text) return;
-    setIsRefining(true);
+    if (!activeDoc || !activeDoc.ocrResult?.text) return;
+    
+    updateQueueItem(activeDoc.id, { isRefining: true });
     try {
-      if (!originalUnrefinedText) {
-        setOriginalUnrefinedText(ocrResult.text);
+      if (!activeDoc.originalUnrefinedText) {
+        updateQueueItem(activeDoc.id, { originalUnrefinedText: activeDoc.ocrResult.text });
       }
 
-      const apiUrl = ocrEngine === 'python' && mode === 'offline' 
+      const apiUrl = activeDoc.ocrEngine === 'python' && mode === 'offline' 
         ? 'http://127.0.0.1:5000/api/refine-text' 
         : '/api/refine-text';
 
@@ -182,7 +213,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: ocrResult.text,
+            text: activeDoc.ocrResult.text,
             mode
           })
         });
@@ -191,7 +222,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: ocrResult.text,
+            text: activeDoc.ocrResult.text,
             mode
           })
         });
@@ -203,38 +234,75 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
 
       const data = await res.json();
       if (data.success && data.text) {
-        setOcrResult(prev => prev ? { ...prev, text: data.text } : null);
-        setIsRefined(true);
-        setRefinementMethod(data.method || (mode === 'ai' ? 'تنقيح بالذكاء الاصطناعي (Gemini)' : 'تنقيح لغوي مورفولوجي أوفلاين'));
+        updateQueueItem(activeDoc.id, {
+          ocrResult: { ...activeDoc.ocrResult, text: data.text },
+          isRefined: true,
+          refinementMethod: data.method || (mode === 'ai' ? 'تنقيح بالذكاء الاصطناعي (Gemini)' : 'تنقيح لغوي مورفولوجي أوفلاين')
+        });
       }
     } catch (err: any) {
       console.error('Refine error:', err);
       alert(`فشل تنقيح النص: ${err.message || 'حدث خطأ'}`);
     } finally {
-      setIsRefining(false);
+      updateQueueItem(activeDoc.id, { isRefining: false });
     }
   };
 
+  // تراجع عن التنقيح للوثيقة النشطة
   const handleUndoRefinement = () => {
-    if (originalUnrefinedText && ocrResult) {
-      setOcrResult({ ...ocrResult, text: originalUnrefinedText });
-      setIsRefined(false);
-      setRefinementMethod(null);
+    if (activeDoc && activeDoc.originalUnrefinedText && activeDoc.ocrResult) {
+      updateQueueItem(activeDoc.id, {
+        ocrResult: { ...activeDoc.ocrResult, text: activeDoc.originalUnrefinedText },
+        isRefined: false,
+        refinementMethod: null
+      });
     }
   };
 
+  // عند سحب وإفلات ملفات جديدة (متعددة)
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    const selectedFile = acceptedFiles[0];
-    if (selectedFile) {
-      setFile(selectedFile);
+    if (acceptedFiles.length === 0) return;
+
+    const newItems: UploadQueueItem[] = [];
+
+    acceptedFiles.forEach((file) => {
+      const id = Math.random().toString(36).substr(2, 9);
+      const barcodeValue = `DMS-${Math.floor(100000 + Math.random() * 900000)}`;
+      const title = file.name.split('.')[0];
+
       const reader = new FileReader();
       reader.onload = () => {
-        setPreview(reader.result as string);
-        setBarcodeValue(`DMS-${Math.floor(100000 + Math.random() * 900000)}`);
+        const previewUrl = reader.result as string;
+        setQueue(prev => prev.map(item => item.id === id ? { ...item, preview: previewUrl } : item));
       };
-      reader.readAsDataURL(selectedFile);
-      setDocTitle(selectedFile.name.split('.')[0]);
-    }
+      reader.readAsDataURL(file);
+
+      newItems.push({
+        id,
+        file,
+        preview: '',
+        title,
+        barcodeValue,
+        ocrResult: null,
+        isProcessing: false,
+        progress: 0,
+        isRefining: false,
+        isRefined: false,
+        refinementMethod: null,
+        originalUnrefinedText: null,
+        isEditingManually: false,
+        showEnhancedPreview: false,
+        ocrEngine: 'python'
+      });
+    });
+
+    setQueue(prev => {
+      const updated = [...prev, ...newItems];
+      if (prev.length === 0) {
+        setActiveIdx(0);
+      }
+      return updated;
+    });
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -243,30 +311,23 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       'image/jpeg': ['.jpeg', '.jpg'],
       'image/png': ['.png'],
     },
-    multiple: false
+    multiple: true // تفعيل الرفع المتعدد
   } as any);
 
-  const classifyText = (text: string): DocumentCategory => {
-    for (const [category, keywords] of Object.entries(CLASSIFICATION_KEYWORDS)) {
-      if (keywords.some(keyword => text.includes(keyword))) {
-        return category as DocumentCategory;
-      }
-    }
-    return DocumentCategory.OTHER;
-  };
+  // تشغيل قراءة النصوص (OCR) للوثيقة النشطة أو أي وثيقة
+  const processOCR = async (idx = activeIdx) => {
+    const doc = queue[idx];
+    if (!doc || !doc.preview) return;
 
-  const processOCR = async () => {
-    if (!preview) return;
-    setIsProcessing(true);
-    setProgress(20);
-    
+    updateQueueItem(doc.id, { isProcessing: true, progress: 20 });
+
     try {
-      const base64Data = preview.split(',')[1];
-      let apiUrl = ocrEngine === 'python' ? 'http://127.0.0.1:5000/api/ocr' : '/api/ocr';
+      const base64Data = doc.preview.split(',')[1];
+      let apiUrl = doc.ocrEngine === 'python' ? 'http://127.0.0.1:5000/api/ocr' : '/api/ocr';
 
-      setProgress(40);
+      updateQueueItem(doc.id, { progress: 40 });
       let response: Response;
-      let usedEngineName = ocrEngine === 'gemini' ? 'Gemini Vision AI + القاموس العربي' : 'سيرفر بايثون المحلي';
+      let usedEngineName = doc.ocrEngine === 'gemini' ? 'Gemini Vision AI + القاموس العربي' : 'سيرفر بايثون المحلي';
 
       try {
         response = await fetch(apiUrl, {
@@ -279,12 +340,12 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           })
         });
 
-        if (!response.ok && ocrEngine === 'python') {
+        if (!response.ok && doc.ocrEngine === 'python') {
           throw new Error('Python server error');
         }
       } catch (err) {
-        // إذا فشل الاتصال بسيرفر بايثون المحلي، التحول التلقائي للمحرك المتقدم
-        if (ocrEngine === 'python') {
+        // التحول التلقائي للمحرك المتقدم أونلاين
+        if (doc.ocrEngine === 'python') {
           console.warn('سيرفر بايثون غير متصل، جاري التحويل لمحرك الذكاء الاصطناعي الفائق أونلاين...');
           response = await fetch('/api/ocr', {
             method: 'POST',
@@ -306,57 +367,60 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
         throw new Error(errorData.error || `خطأ السيرفر: ${response.status}`);
       }
 
-      setProgress(85);
+      updateQueueItem(doc.id, { progress: 85 });
       const data = await response.json();
-      
+
       const rawText = data.text || '';
-      // معالجة القاموس والتصحيح العربي المحلي
       const correctedText = normalizeAndCorrectArabicText(rawText);
       const finalEngine = data.engine || usedEngineName;
       const stages = data.stages || [];
       const enhancedImage = data.enhanced_image || null;
-      
-      setProgress(100);
-      
+
       const category = classifyText(correctedText);
-      setOcrResult({ 
-        text: correctedText, 
-        category, 
-        engine: finalEngine,
-        stages,
-        enhancedImage
+      
+      updateQueueItem(doc.id, {
+        progress: 100,
+        ocrResult: { 
+          text: correctedText, 
+          category, 
+          engine: finalEngine,
+          stages,
+          enhancedImage
+        }
       });
     } catch (error: any) {
       console.error('OCR Error:', error);
-      alert(`حدث خطأ أثناء معالجة المستند:\n${error.message || 'خطأ غير معروف'}`);
+      alert(`حدث خطأ أثناء معالجة المستند ${doc.title}:\n${error.message || 'خطأ غير معروف'}`);
     } finally {
-      setIsProcessing(false);
+      updateQueueItem(doc.id, { isProcessing: false });
     }
   };
 
   const handleCopy = () => {
-    if (ocrResult?.text) {
-      navigator.clipboard.writeText(ocrResult.text);
+    if (activeDoc?.ocrResult?.text) {
+      navigator.clipboard.writeText(activeDoc.ocrResult.text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
-  const saveDocument = async () => {
-    if (!file || !preview) return;
-    
+  // حفظ وثيقة منفردة في الخادم لقاعدة البيانات
+  const saveSingleDocument = async (idx: number): Promise<Document | null> => {
+    const doc = queue[idx];
+    if (!doc || !doc.preview) return null;
+
     const newDoc: Document = {
       id: Math.random().toString(36).substr(2, 9),
-      title: docTitle,
-      category: (ocrResult?.category as DocumentCategory) || DocumentCategory.OTHER,
+      title: doc.title,
+      category: (doc.ocrResult?.category as DocumentCategory) || DocumentCategory.OTHER,
       uploadDate: new Date().toISOString(),
-      fileType: file.type.includes('pdf') ? 'pdf' : 'image',
+      fileType: doc.file.type.includes('pdf') ? 'pdf' : 'image',
       uploaderId: '1',
       uploaderName: 'مدير النظام',
-      barcode: barcodeValue,
-      originalFileName: file.name,
-      extractedText: ocrResult?.text || '',
-      fileData: preview
+      barcode: doc.barcodeValue,
+      originalFileName: doc.file.name,
+      extractedText: doc.ocrResult?.text || '',
+      fileData: doc.preview
     };
 
     try {
@@ -366,445 +430,557 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
         body: JSON.stringify(newDoc)
       });
       if (response.ok) {
-        onUploadSuccess(newDoc);
-        reset();
+        return newDoc;
       }
     } catch (error) {
       console.error('Save Error:', error);
     }
+    return null;
+  };
+
+  // حفظ المستند النشط الحالي
+  const saveCurrentDocument = async () => {
+    if (activeIdx < 0 || !activeDoc) return;
+    const doc = await saveSingleDocument(activeIdx);
+    if (doc) {
+      // إزالة المستند الذي تم حفظه من الطابور
+      const newQueue = queue.filter((_, i) => i !== activeIdx);
+      setQueue(newQueue);
+      if (newQueue.length > 0) {
+        setActiveIdx(Math.max(0, activeIdx - 1));
+      } else {
+        setActiveIdx(-1);
+      }
+      onUploadSuccess(doc);
+    } else {
+      alert('فشل حفظ المستند الحالي');
+    }
+  };
+
+  // حفظ جميع المستندات في الطابور دفعة واحدة
+  const saveAllDocuments = async () => {
+    if (queue.length === 0) return;
+    
+    let savedCount = 0;
+    let lastSavedDoc: Document | null = null;
+
+    for (let i = 0; i < queue.length; i++) {
+      const doc = await saveSingleDocument(i);
+      if (doc) {
+        savedCount++;
+        lastSavedDoc = doc;
+      }
+    }
+
+    if (savedCount > 0) {
+      alert(`تم حفظ عدد (${savedCount}) وثيقة/مستند بنجاح في الأرشيف الرقمي الموحد.`);
+      if (lastSavedDoc) {
+        onUploadSuccess(lastSavedDoc);
+      }
+      reset();
+    } else {
+      alert('فشل حفظ المستندات. تأكد من إتمام قراءة النصوص للمستندات أولاً.');
+    }
+  };
+
+  // إزالة مستند من الطابور
+  const removeQueueItem = (idxToRemove: number) => {
+    const updated = queue.filter((_, i) => i !== idxToRemove);
+    setQueue(updated);
+    if (updated.length === 0) {
+      setActiveIdx(-1);
+    } else if (activeIdx >= updated.length) {
+      setActiveIdx(updated.length - 1);
+    }
   };
 
   const reset = () => {
-    setFile(null);
-    setPreview(null);
-    setOcrResult(null);
-    setDocTitle('');
-    setBarcodeValue('');
-    setIsRefined(false);
-    setRefinementMethod(null);
-    setOriginalUnrefinedText(null);
+    setQueue([]);
+    setActiveIdx(-1);
     setOllamaError(null);
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-1" dir="rtl">
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50">
-          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
-            <Upload className="text-blue-600" />
-            أرشفة مستند جديد
-          </h2>
-          <p className="text-slate-500 mt-2">قم برفع الصور أو ملفات PDF لبدء عملية الأرشفة الذكية</p>
+    <div className="max-w-6xl mx-auto p-1" dir="rtl">
+      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl overflow-hidden">
+        
+        {/* الترويسة الفاخرة */}
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-wrap justify-between items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+              <Upload className="text-blue-600 animate-bounce" />
+              أرشفة وسحب النصوص من وثائق متعددة
+            </h2>
+            <p className="text-slate-500 mt-2">اسحب مجموعة من الكتب الرسمية أو الصور لمعالجتها وأرشفتها يدوياً وتلقائياً دفعة واحدة</p>
+          </div>
+          {queue.length > 0 && (
+            <button 
+              onClick={reset}
+              className="px-5 py-2 text-sm font-semibold text-red-500 hover:bg-red-50 rounded-xl transition-all"
+            >
+              مسح الطابور بالكامل
+            </button>
+          )}
         </div>
 
         <div className="p-8">
-          {!file ? (
+          {queue.length === 0 ? (
+            /* منطقة الإفلات والرفع */
             <div 
               {...getRootProps()} 
               className={`
-                border-3 border-dashed rounded-3xl p-16 text-center transition-all duration-300 cursor-pointer
+                border-3 border-dashed rounded-3xl p-20 text-center transition-all duration-300 cursor-pointer
                 ${isDragActive ? 'border-blue-500 bg-blue-50 scale-[1.02]' : 'border-slate-200 hover:border-blue-400 hover:bg-slate-50'}
               `}
             >
               <input {...getInputProps()} />
-              <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600">
-                <Upload size={32} />
+              <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600">
+                <Upload size={40} />
               </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-2">اسحب الملف هنا</h3>
-              <p className="text-slate-500">أو اضغط لاختيار ملف من جهازك</p>
-              <div className="mt-6 flex justify-center gap-4 text-xs font-medium text-slate-400">
-                <span className="px-3 py-1 bg-slate-100 rounded-full">JPG / PNG</span>
-                <span className="px-3 py-1 bg-slate-100 rounded-full">PDF</span>
-                <span className="px-3 py-1 bg-slate-100 rounded-full">Max 10MB</span>
+              <h3 className="text-2xl font-bold text-slate-900 mb-2">اسحب الوثائق والملفات هنا</h3>
+              <p className="text-slate-500 text-base">أو اضغط لاختيار عدة ملفات (صور أو كتب إدارية) من جهازك</p>
+              <div className="mt-8 flex justify-center gap-4 text-xs font-semibold text-slate-400">
+                <span className="px-4 py-1.5 bg-slate-100 rounded-full">JPG / PNG</span>
+                <span className="px-4 py-1.5 bg-slate-100 rounded-full">معالجة دفعية (Multi-Upload)</span>
+                <span className="px-4 py-1.5 bg-slate-100 rounded-full">Max 15MB</span>
               </div>
             </div>
           ) : (
-            <div className="space-y-8">
-              <div className="flex items-center gap-6 p-6 bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600">
-                  <File size={32} />
-                </div>
-                <div className="flex-1">
-                  <input 
-                    type="text" 
-                    value={docTitle} 
-                    onChange={(e) => setDocTitle(e.target.value)}
-                    className="text-lg font-bold text-slate-900 bg-transparent border-none focus:ring-0 w-full p-0"
-                    placeholder="عنوان المستند..."
-                  />
-                  <p className="text-sm text-slate-400">{file.name} • {(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                </div>
-                <button onClick={reset} className="p-2 hover:bg-white rounded-full text-slate-400 hover:text-red-500 transition-colors">
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                      <Type size={18} className="text-blue-500" />
-                      استخراج النصوص (OCR)
-                    </h4>
-                    {ocrResult && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleCopy}
-                          className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 rounded-lg transition-colors shadow-sm"
-                          title="نسخ النص المفرغ"
-                        >
-                          {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                          <span>{copied ? 'تم النسخ!' : 'نسخ النص'}</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            const blob = new Blob([ocrResult.text], { type: 'text/plain;charset=utf-8' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `${docTitle || 'document'}_arabic_text.txt`;
-                            a.click();
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-xs text-white font-medium rounded-lg transition-colors shadow-sm"
-                          title="تنزيل كملف نصي للوورد"
-                        >
-                          <span>تحميل للوورد (Word TXT)</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* اختيار محرك المعالجة */}
-                  <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => setOcrEngine('python')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-                        ocrEngine === 'python'
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                      }`}
-                    >
-                      <Server size={14} />
-                      <span>سيرفر بايثون (Offline 100%)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOcrEngine('gemini')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-                        ocrEngine === 'gemini'
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                      }`}
-                    >
-                      <Sparkles size={14} />
-                      <span>الذكاء الاصطناعي أونلاين (99.9%)</span>
-                    </button>
-                  </div>
-
-                  {/* صندوق استعراض النص المفرغ بخط الوورد العربي */}
-                  <div className="h-72 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative group border border-slate-800">
-                    <AnimatePresence mode="wait">
-                      {isProcessing ? (
-                        <motion.div 
-                          key="loading"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="absolute inset-0 flex flex-col items-center justify-center text-blue-400 gap-4 bg-slate-900/90 backdrop-blur-sm p-4 text-center"
-                        >
-                          <Loader2 className="animate-spin" size={32} />
-                          <p className="text-sm font-semibold">
-                            {ocrEngine === 'gemini'
-                              ? 'جاري استخراج النصوص بالذكاء الاصطناعي الفائق...'
-                              : 'جاري معالجة الصورة بـ OpenCV وتنقية الخطوط أوفلاين...'}
-                          </p>
-                          <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-blue-500 transition-all duration-300" 
-                              style={{ width: `${progress}%` }} 
-                            />
-                          </div>
-                        </motion.div>
-                      ) : ocrResult ? (
-                        <motion.div
-                          key="result"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          className="space-y-3"
-                        >
-                          {ocrResult.engine && (
-                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                              <span className="px-2.5 py-0.5 bg-blue-950 text-blue-300 text-[11px] font-semibold rounded-md border border-blue-800/50">
-                                المحرك: {ocrResult.engine}
-                              </span>
-                              {ocrResult.enhancedImage && (
-                                <button
-                                  onClick={() => setShowEnhancedPreview(!showEnhancedPreview)}
-                                  className="text-[11px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
-                                >
-                                  {showEnhancedPreview ? 'إخفاء المعاينة المحسنة' : 'معاينة الصورة المعدلة 2.5x (أبيض وأسود)'}
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          {showEnhancedPreview && ocrResult.enhancedImage && (
-                            <div className="p-2 bg-slate-950 rounded-xl border border-slate-800">
-                              <p className="text-[10px] text-blue-400 mb-1 font-bold">صورة الوثيقة بعد التكبير 2.5x وتعديل الميلان والتباين (High-Contrast Binarization):</p>
-                              <img src={ocrResult.enhancedImage} alt="Enhanced" className="max-h-48 rounded border border-slate-700 object-contain mx-auto" />
-                            </div>
-                          )}
-
-                          {/* عرض مراحل الذكاء الاصطناعي الأوفلاين الأربعة */}
-                          {ocrResult.stages && ocrResult.stages.length > 0 && (
-                            <div className="p-2.5 bg-slate-950/80 rounded-xl border border-blue-900/40 text-right space-y-2">
-                              <div className="flex items-center gap-1.5 text-blue-400 font-bold text-xs">
-                                <Sparkles size={13} />
-                                <span>مراحل معالجة الذكاء الاصطناعي الأوفلاين المكتملة (4 Stages):</span>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-[10px]">
-                                {ocrResult.stages.map((stg) => (
-                                  <div key={stg.stage} className="bg-slate-900/90 p-2 rounded-lg border border-slate-800/80">
-                                    <span className="font-bold text-blue-300 block mb-0.5">{stg.title}</span>
-                                    <span className="text-slate-400 leading-tight block">{stg.details}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <div 
-                            className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif tracking-normal text-right p-2 bg-slate-950/60 rounded-xl border border-slate-800/80 relative"
-                            style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
-                            dir="rtl"
-                          >
-                            {isRefining && (
-                              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-blue-400 gap-2 z-10">
-                                <Loader2 size={28} className="animate-spin text-blue-500" />
-                                <span className="text-xs font-bold text-white">جاري تنقيح وتعديل النص بالذكاء الاصطناعي وتصحيح الكشيدة والأسماء...</span>
-                              </div>
-                            )}
-                            {ocrResult.text}
-                          </div>
-                        </motion.div>
-                      ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3 text-center p-4">
-                          <p className="text-xs text-slate-400">
-                            {ocrEngine === 'python'
-                              ? '🖥️ معالجة حاسوبية متقدمة (OpenCV) لتوضيح الحروف وتعديل الميلان وتصحيح العبارات الرسمية.'
-                              : '⚡ محرك أونلاين يستخرج الكتاب الرسمي بدقة 99.9%.'}
-                          </p>
-                          <button 
-                            onClick={processOCR}
-                            className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-500 shadow-md transition-all flex items-center gap-2 active:scale-95"
-                          >
-                            <Sparkles size={16} />
-                            بدء القراءة واستخراج النص
-                          </button>
-                        </div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* شريط زر تنقيح وتعديل النص بالذكاء الاصطناعي (يظهر بعد استخراج النص بالكامل) */}
-                  {ocrResult && !isProcessing && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="p-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl border border-blue-800/60 shadow-lg space-y-3"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-2 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/30 shadow-inner">
-                            <Wand2 size={18} className="animate-pulse text-amber-300" />
-                          </div>
-                          <div>
-                            <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span>أداة تنقيح وتعديل النص بالذكاء الاصطناعي</span>
-                              {isRefined && (
-                                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-full border border-emerald-500/40 flex items-center gap-1">
-                                  <CheckCircle2 size={11} /> تم تنقيح وتعديل النص بنجاح
-                                </span>
-                              )}
-                            </h5>
-                            <p className="text-[11px] text-slate-300 mt-0.5">
-                              {isRefined && refinementMethod
-                                ? `طريقة المعالجة والتنقيح: ${refinementMethod}`
-                                : 'تصحّح أخطاء مد الحروف (سس)، الكلمات الملتصقة، الحروف المفككة، والأسماء المكتوبة بالخط الرقعي/الإداري.'}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center flex-wrap gap-2">
-                          {isRefined && originalUnrefinedText && (
-                            <button
-                              onClick={handleUndoRefinement}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl border border-slate-700 transition-colors shadow-sm"
-                              title="التراجع إلى النص المستخرج الأصلي"
-                            >
-                              <RotateCcw size={13} />
-                              <span>تراجع للأصلي</span>
-                            </button>
-                          )}
-                          <button
-                            disabled={isRefining}
-                            onClick={() => handleRefineText('offline')}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all shadow-sm disabled:opacity-50"
-                            title="تنقيح سريع بدون إنترنت باستخدام المعجم المورفولوجي والقانوني المحلي"
-                          >
-                            <Server size={13} className="text-blue-400" />
-                            <span>تنقيح أوفلاين</span>
-                          </button>
-
-                          {/* زر التدقيق والتحسين بواسطة Ollama */}
-                          <button
-                            disabled={isRefining}
-                            onClick={handleOllamaRefine}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-850 text-indigo-100 text-xs font-bold rounded-xl border border-indigo-700/60 transition-all shadow-md hover:shadow-indigo-500/10 active:scale-95 disabled:opacity-50"
-                            title="تدقيق وتصحيح لغوي فائق الدقة أوفلاين باستخدام تطبيق Ollama المثبت على جهازك"
-                          >
-                            <Cpu size={13} className="text-amber-400 animate-pulse" />
-                            <span>🦙 تدقيق Ollama أوفلاين</span>
-                          </button>
-
-                          {/* زر إعدادات Ollama */}
-                          <button
-                            onClick={() => setShowOllamaSettings(!showOllamaSettings)}
-                            className={`p-1.5 rounded-xl border transition-all ${showOllamaSettings ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-850 text-slate-400 border-slate-700 hover:text-white'}`}
-                            title="إعدادات Ollama"
-                          >
-                            <Settings size={14} />
-                          </button>
-
-                          <button
-                            disabled={isRefining}
-                            onClick={() => handleRefineText('ai')}
-                            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50 border border-blue-400/30"
-                          >
-                            {isRefining ? (
-                              <Loader2 size={15} className="animate-spin" />
-                            ) : (
-                              <Wand2 size={15} className="text-amber-300" />
-                            )}
-                            <span>✨ تنقيح ذكي (Gemini)</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* لوحة أخطاء وإعدادات Ollama */}
-                      <AnimatePresence>
-                        {(showOllamaSettings || ollamaError) && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="overflow-hidden border-t border-slate-800/80 pt-3 space-y-3"
-                          >
-                            {ollamaError && (
-                              <div className="p-3 bg-red-950/40 border border-red-850 rounded-xl text-red-200 text-xs leading-relaxed">
-                                <p className="font-bold flex items-center gap-1.5 mb-1 text-red-300">
-                                  <span>⚠️ فشل الاتصال بخدمة Ollama:</span>
-                                </p>
-                                <p className="whitespace-pre-line">{ollamaError}</p>
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800/40">
-                              <div>
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">اسم نموذج Ollama المستخدم:</label>
-                                <input 
-                                  type="text"
-                                  value={ollamaModel}
-                                  onChange={(e) => handleOllamaModelChange(e.target.value)}
-                                  placeholder="مثال: qwen2.5 أو llama3"
-                                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 text-white rounded-xl text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                  تأكد من كتابة اسم النموذج بشكل مطابق تماماً لما تم تحميله في Ollama.
-                                </p>
-                              </div>
-
-                              <div>
-                                <label className="block text-[11px] font-bold text-slate-400 mb-1">رابط خدمة Ollama المحلية:</label>
-                                <input 
-                                  type="text"
-                                  value={ollamaHost}
-                                  onChange={(e) => handleOllamaHostChange(e.target.value)}
-                                  placeholder="http://127.0.0.1:11434"
-                                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 text-white rounded-xl text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none ltr"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                  العنوان الافتراضي لـ Ollama هو http://127.0.0.1:11434.
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="p-3 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-2">
-                              <h6 className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
-                                <HelpCircle size={14} />
-                                <span>طريقة تشغيل وتجهيز أداة Ollama أوفلاين بالكامل:</span>
-                              </h6>
-                              <ul className="text-[11px] text-slate-300 space-y-1 list-decimal list-inside pr-1 leading-relaxed">
-                                <li>
-                                  تأكد من تشغيل برنامج <strong className="text-white">Ollama Windows</strong> على حاسوبك (تظهر أيقونة البرنامج بجانب ساعة نظام ويندوز).
-                                </li>
-                                <li>
-                                  افتح سطر الأوامر أو موجه الأوامر (<strong className="text-white">CMD</strong>) على حاسوبك، واكتب الأمر التالي لتثبيت وتشغيل نموذج اللغة العربية الفائق Qwen:
-                                  <div className="mt-1.5 p-2 bg-slate-950 text-emerald-400 rounded-lg font-mono text-[11px] text-left select-all border border-slate-800 flex justify-between items-center">
-                                    <span>ollama run qwen2.5</span>
-                                    <span className="text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">انقر للتحديد والنسخ</span>
-                                  </div>
-                                </li>
-                                <li>
-                                  عند تشغيل النموذج وسحب النص، اضغط على زر <strong className="text-white">تدقيق Ollama أوفلاين</strong> أعلاه ليقوم بتعديل وتدقيق النص كاملاً وبشكل فوري بدون إنترنت.
-                                </li>
-                              </ul>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </motion.div>
-                  )}
-                </div>
-
-                <div className="space-y-4 text-center flex flex-col items-center justify-center border border-slate-100 rounded-2xl p-6 bg-slate-50/30">
-                  <h4 className="font-bold text-slate-900 flex items-center gap-2 w-full">
-                    <BarcodeIcon size={18} className="text-blue-500" />
-                    الباركود المولد
+            /* واجهة الطابور المتعدد */
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+              
+              {/* العمود الأيمن: طابور الملفات المرفوعة */}
+              <div className="lg:col-span-1 border-l border-slate-100 pl-4 space-y-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <span>قائمة الوثائق المرفوعة</span>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full font-bold">{queue.length}</span>
                   </h4>
-                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-inner inline-block">
-                    <Barcode 
-                      value={barcodeValue} 
-                      width={1.5} 
-                      height={60} 
-                      fontSize={14}
-                      background="#ffffff"
-                    />
+                  {/* زر إضافة المزيد من الصور إلى الطابور الحالي */}
+                  <div {...getRootProps()} className="cursor-pointer">
+                    <input {...getInputProps()} />
+                    <button type="button" className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="إضافة المزيد من الصور">
+                      <Plus size={16} />
+                    </button>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2">سيتم طباعة هذا الكود على ملصق الأرشفة</p>
+                </div>
+
+                <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                  {queue.map((item, idx) => {
+                    const isActive = idx === activeIdx;
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => setActiveIdx(idx)}
+                        className={`
+                          group p-3 rounded-2xl border transition-all duration-200 cursor-pointer relative flex items-center gap-3
+                          ${isActive 
+                            ? 'bg-blue-50 border-blue-200 shadow-sm' 
+                            : 'bg-white border-slate-150 hover:bg-slate-50 hover:border-slate-300'
+                          }
+                        `}
+                      >
+                        {item.preview ? (
+                          <img src={item.preview} alt="" className="w-12 h-12 rounded-lg object-cover bg-slate-100 border border-slate-200 shadow-sm" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
+                            <File size={20} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{item.title || 'وثيقة بلا عنوان'}</p>
+                          <p className="text-[10px] text-slate-400 mt-1 truncate">{item.file.name}</p>
+                          {item.ocrResult ? (
+                            <span className="inline-block mt-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">تم قراءة النص</span>
+                          ) : item.isProcessing ? (
+                            <span className="inline-block mt-1 text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded animate-pulse">جاري المعالجة {item.progress}%</span>
+                          ) : (
+                            <span className="inline-block mt-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">بانتظار القراءة</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeQueueItem(idx);
+                          }}
+                          className="absolute top-2 left-2 p-1 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="flex justify-end gap-4 pt-4">
-                <button 
-                  onClick={reset}
-                  className="px-8 py-3 rounded-2xl text-slate-500 font-bold hover:bg-slate-100 transition-colors"
-                >
-                  إلغاء
-                </button>
-                <button 
-                  disabled={isProcessing}
-                  onClick={saveDocument}
-                  className="px-10 py-3 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 flex items-center gap-2"
-                >
-                  <Save size={20} />
-                  حفظ في الأرشيف
-                </button>
+              {/* العمود الأيسر: معالجة وعرض الوثيقة النشطة المحددة */}
+              <div className="lg:col-span-3 space-y-6">
+                {activeDoc ? (
+                  <div className="space-y-6">
+                    {/* معلومات المستند الحالي */}
+                    <div className="flex flex-wrap items-center gap-4 p-5 bg-slate-50 rounded-2xl border border-slate-100 justify-between">
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <div className="w-14 h-14 bg-white rounded-xl shadow-sm flex items-center justify-center text-blue-600 border border-slate-100">
+                          <File size={28} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <input 
+                            type="text" 
+                            value={activeDoc.title} 
+                            onChange={(e) => updateQueueItem(activeDoc.id, { title: e.target.value })}
+                            className="text-base font-bold text-slate-900 bg-transparent border-none focus:ring-0 w-full p-0 focus:outline-none"
+                            placeholder="تسمية المستند..."
+                          />
+                          <p className="text-xs text-slate-400 mt-0.5">{activeDoc.file.name} • {(activeDoc.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs bg-slate-200 text-slate-700 font-bold px-3 py-1 rounded-full">رقم الباركود: {activeDoc.barcodeValue}</span>
+                      </div>
+                    </div>
+
+                    {/* تفاصيل القراءة والصور */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      
+                      {/* معاينة صورة الوثيقة */}
+                      <div className="space-y-3">
+                        <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <File size={16} className="text-blue-500" />
+                          معاينة صورة الكتاب الرسمي
+                        </h4>
+                        <div className="h-80 bg-slate-900 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-200 p-2 relative">
+                          {activeDoc.preview ? (
+                            <img src={activeDoc.preview} alt="" className="max-w-full max-h-full rounded object-contain" />
+                          ) : (
+                            <div className="text-slate-500 flex flex-col items-center gap-2">
+                              <Loader2 className="animate-spin text-blue-500" />
+                              <span className="text-xs">جاري تجهيز الصورة...</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* النصوص المستخرجة والتعديل اليدوي */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                            <Type size={16} className="text-blue-500" />
+                            استخراج النصوص والتصحيح اليدوي
+                          </h4>
+                          {activeDoc.ocrResult && (
+                            <div className="flex items-center gap-1.5">
+                              {/* زر نسخ النص */}
+                              <button
+                                onClick={handleCopy}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 rounded-lg transition-colors shadow-sm"
+                              >
+                                {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                <span>{copied ? 'تم نسخ النص!' : 'نسخ'}</span>
+                              </button>
+                              
+                              {/* زر التبديل للتعديل اليدوي */}
+                              <button
+                                onClick={() => updateQueueItem(activeDoc.id, { isEditingManually: !activeDoc.isEditingManually })}
+                                className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold rounded-lg transition-colors border shadow-sm ${
+                                  activeDoc.isEditingManually 
+                                    ? 'bg-amber-600 border-amber-500 text-white hover:bg-amber-500' 
+                                    : 'bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100'
+                                }`}
+                              >
+                                <Edit3 size={12} />
+                                <span>{activeDoc.isEditingManually ? 'إنهاء التعديل' : 'تعديل يدوياً ✍️'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* اختيار محرك القراءة للوثيقة الحالية */}
+                        <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => updateQueueItem(activeDoc.id, { ocrEngine: 'python' })}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-bold transition-all ${
+                              activeDoc.ocrEngine === 'python'
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                            }`}
+                          >
+                            <Server size={12} />
+                            <span>سيرفر بايثون (أوفلاين)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateQueueItem(activeDoc.id, { ocrEngine: 'gemini' })}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg font-bold transition-all ${
+                              activeDoc.ocrEngine === 'gemini'
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                            }`}
+                          >
+                            <Sparkles size={12} />
+                            <span>الذكاء الاصطناعي أونلاين</span>
+                          </button>
+                        </div>
+
+                        {/* صندوق عرض / تعديل النص المستخرج */}
+                        <div className="h-64 bg-slate-900 rounded-2xl p-4 overflow-y-auto relative border border-slate-800">
+                          <AnimatePresence mode="wait">
+                            {activeDoc.isProcessing ? (
+                              <motion.div 
+                                key="loading"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 flex flex-col items-center justify-center text-blue-400 gap-3 bg-slate-900/95 backdrop-blur-sm p-4 text-center"
+                              >
+                                <Loader2 className="animate-spin text-blue-500" size={28} />
+                                <p className="text-xs font-semibold">
+                                  {activeDoc.ocrEngine === 'gemini'
+                                    ? 'جاري استخراج وتفريغ النص بنظام Gemini الفائق...'
+                                    : 'جاري قراءة أحرف الكتاب وتصحيح العبارات أوفلاين...'}
+                                </p>
+                                <div className="w-40 h-1 bg-slate-800 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-blue-500 transition-all duration-300" 
+                                    style={{ width: `${activeDoc.progress}%` }} 
+                                  />
+                                </div>
+                              </motion.div>
+                            ) : activeDoc.ocrResult ? (
+                              <motion.div key="result" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 text-[10px]">
+                                  <span className="px-2 py-0.5 bg-blue-950 text-blue-300 font-semibold rounded border border-blue-800/50">
+                                    المحرك: {activeDoc.ocrResult.engine}
+                                  </span>
+                                  {activeDoc.ocrResult.enhancedImage && (
+                                    <button
+                                      onClick={() => updateQueueItem(activeDoc.id, { showEnhancedPreview: !activeDoc.showEnhancedPreview })}
+                                      className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
+                                    >
+                                      {activeDoc.showEnhancedPreview ? 'إخفاء المعاينة المحسنة' : 'معاينة الصورة المعززة'}
+                                    </button>
+                                  )}
+                                </div>
+
+                                {activeDoc.showEnhancedPreview && activeDoc.ocrResult.enhancedImage && (
+                                  <div className="p-1.5 bg-slate-950 rounded-lg border border-slate-800">
+                                    <img src={activeDoc.ocrResult.enhancedImage} alt="" className="max-h-36 rounded object-contain mx-auto" />
+                                  </div>
+                                )}
+
+                                {activeDoc.isEditingManually ? (
+                                  /* حقل التعديل اليدوي للنص المستخرج حديثاً */
+                                  <textarea
+                                    value={activeDoc.ocrResult.text}
+                                    onChange={(e) => {
+                                      const updatedText = e.target.value;
+                                      updateQueueItem(activeDoc.id, {
+                                        ocrResult: { ...activeDoc.ocrResult, text: updatedText }
+                                      });
+                                    }}
+                                    className="w-full h-44 p-3 bg-slate-950 text-slate-100 text-base rounded-xl border border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none leading-loose font-serif text-right resize-none"
+                                    style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
+                                    dir="rtl"
+                                    placeholder="اكتب أو عدّل النص المستخرج هنا يدوياً..."
+                                  />
+                                ) : (
+                                  /* وضع العرض الفخم المعتاد */
+                                  <div 
+                                    className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif text-right p-1 relative"
+                                    style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
+                                    dir="rtl"
+                                  >
+                                    {activeDoc.isRefining && (
+                                      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center text-blue-400 gap-1 z-10">
+                                        <Loader2 size={24} className="animate-spin text-blue-500" />
+                                        <span className="text-[11px] text-white">جاري تنقيح وتصحيح النص وتطبيق المعالجات اللغوية...</span>
+                                      </div>
+                                    )}
+                                    {activeDoc.ocrResult.text || 'لا يوجد نص مستخرج أو تم تفريغه كلياً.'}
+                                  </div>
+                                )}
+                              </motion.div>
+                            ) : (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2.5 text-center p-4">
+                                <p className="text-[11px] text-slate-400">
+                                  {activeDoc.ocrEngine === 'python'
+                                    ? '🖥️ معالجة محلية بالكامل تعتمد على الذكاء الاصطناعي ومعاجم لغوية أوفلاين.'
+                                    : '⚡ قراءة ذكية مع تدقيق تلقائي فوري لأدق التفاصيل الكوفية والرقعية.'}
+                                </p>
+                                <button 
+                                  onClick={() => processOCR(activeIdx)}
+                                  className="px-5 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500 shadow transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <Sparkles size={14} />
+                                  قراءة الوثيقة وسحب النص
+                                </button>
+                              </div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* أداة تنقيح وتعديل النص بالذكاء الاصطناعي */}
+                    {activeDoc.ocrResult && !activeDoc.isProcessing && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl border border-blue-800/60 shadow-lg space-y-3 text-right"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/30">
+                              <Wand2 size={16} className="text-amber-300" />
+                            </div>
+                            <div>
+                              <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <span>أداة تنقيح وتدقيق النص الفوري</span>
+                                {activeDoc.isRefined && (
+                                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-bold rounded-full border border-emerald-500/40">
+                                    تم التدقيق بنجاح
+                                  </span>
+                                )}
+                              </h5>
+                              <p className="text-[10px] text-slate-300 mt-0.5">
+                                {activeDoc.isRefined && activeDoc.refinementMethod
+                                  ? `طريقة المعالجة: ${activeDoc.refinementMethod}`
+                                  : 'تصحّح الكلمات الملتصقة والأحرف المتباعدة تلقائياً بضغطة واحدة.'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center flex-wrap gap-1.5">
+                            {activeDoc.isRefined && activeDoc.originalUnrefinedText && (
+                              <button
+                                onClick={handleUndoRefinement}
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium rounded-xl border border-slate-700 transition-colors"
+                                title="التراجع إلى النص المستخرج الأصلي"
+                              >
+                                <RotateCcw size={12} />
+                                <span>تراجع</span>
+                              </button>
+                            )}
+                            <button
+                              disabled={activeDoc.isRefining}
+                              onClick={() => handleRefineText('offline')}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold rounded-xl border border-slate-700 transition-all"
+                            >
+                              <Server size={12} className="text-blue-400" />
+                              <span>تنقيح أوفلاين</span>
+                            </button>
+
+                            <button
+                              disabled={activeDoc.isRefining}
+                              onClick={handleOllamaRefine}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-900/80 hover:bg-indigo-850 text-indigo-100 text-[11px] font-bold rounded-xl border border-indigo-700/60 transition-all"
+                            >
+                              <Cpu size={12} className="text-amber-400" />
+                              <span>🦙 Ollama أوفلاين</span>
+                            </button>
+
+                            <button
+                              onClick={() => setShowOllamaSettings(!showOllamaSettings)}
+                              className={`p-1.5 rounded-xl border transition-all ${showOllamaSettings ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-850 text-slate-400 border-slate-700'}`}
+                            >
+                              <Settings size={12} />
+                            </button>
+
+                            <button
+                              disabled={activeDoc.isRefining}
+                              onClick={() => handleRefineText('ai')}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-bold rounded-xl shadow border border-blue-400/30"
+                            >
+                              <Wand2 size={12} className="text-amber-300" />
+                              <span>✨ تنقيح (Gemini)</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* إعدادات Ollama في حال التفعيل */}
+                        <AnimatePresence>
+                          {(showOllamaSettings || ollamaError) && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden border-t border-slate-800/80 pt-3 space-y-3"
+                            >
+                              {ollamaError && (
+                                <div className="p-2.5 bg-red-950/40 border border-red-850 rounded-xl text-red-200 text-xs">
+                                  <p className="font-bold mb-1">⚠️ خطأ Ollama:</p>
+                                  <p>{ollamaError}</p>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/40">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 mb-1">اسم النموذج (Ollama Model):</label>
+                                  <input 
+                                    type="text"
+                                    value={ollamaModel}
+                                    onChange={(e) => handleOllamaModelChange(e.target.value)}
+                                    className="w-full px-2.5 py-1 bg-slate-900 border border-slate-800 text-white rounded-lg text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-400 mb-1">رابط الخدمة (Ollama Host):</label>
+                                  <input 
+                                    type="text"
+                                    value={ollamaHost}
+                                    onChange={(e) => handleOllamaHostChange(e.target.value)}
+                                    className="w-full px-2.5 py-1 bg-slate-900 border border-slate-800 text-white rounded-lg text-xs ltr"
+                                  />
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.div>
+                    )}
+
+                    {/* الباركود */}
+                    <div className="flex flex-col items-center justify-center p-4 border border-slate-100 rounded-2xl bg-slate-50/50">
+                      <Barcode value={activeDoc.barcodeValue} width={1.2} height={45} fontSize={11} />
+                    </div>
+
+                    {/* شريط الأزرار لحفظ المستندات */}
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-100">
+                      <div className="text-xs text-slate-400 font-medium">
+                        مستندات جاهزة للحفظ في الطابور: {queue.filter(q => q.ocrResult).length} من {queue.length}
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={saveCurrentDocument}
+                          disabled={!activeDoc.ocrResult || activeDoc.isProcessing}
+                          className="px-6 py-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl font-bold text-xs transition-all disabled:opacity-50"
+                        >
+                          حفظ المستند الحالي فقط
+                        </button>
+                        <button
+                          onClick={saveAllDocuments}
+                          disabled={queue.length === 0}
+                          className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-blue-700 transition-all flex items-center gap-1.5"
+                        >
+                          <Save size={14} />
+                          حفظ جميع مستندات الطابور ({queue.length})
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 py-20">
+                    يرجى تحديد وثيقة من الطابور الأيمن لبدء قراءتها وتعديل نصوصها.
+                  </div>
+                )}
               </div>
+
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

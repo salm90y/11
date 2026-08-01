@@ -16,7 +16,10 @@ import {
   X,
   FileText,
   Download,
-  Printer
+  Printer,
+  Edit3,
+  Save,
+  Check
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -31,6 +34,18 @@ export default function App() {
     recentActivity: []
   });
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+
+  // حالات تعديل الوثيقة المحفوظة يدوياً
+  const [isEditingSavedDoc, setIsEditingSavedDoc] = useState(false);
+  const [editedSavedDocText, setEditedSavedDocText] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  useEffect(() => {
+    if (selectedDoc) {
+      setEditedSavedDocText(selectedDoc.extractedText || '');
+      setIsEditingSavedDoc(false);
+    }
+  }, [selectedDoc]);
 
   useEffect(() => {
     fetchData();
@@ -58,6 +73,34 @@ export default function App() {
       fetchData();
     } catch (error) {
       console.error('Delete Error:', error);
+    }
+  };
+
+  const handleSaveDocumentEdit = async () => {
+    if (!selectedDoc) return;
+    setIsSavingEdit(true);
+    try {
+      const response = await fetch(`/api/documents/${selectedDoc.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extractedText: editedSavedDocText })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.doc) {
+          setSelectedDoc(data.doc);
+          setDocuments(prevDocs => prevDocs.map(d => d.id === selectedDoc.id ? data.doc : d));
+          fetchData();
+          setIsEditingSavedDoc(false);
+        }
+      } else {
+        alert('فشل حفظ التعديلات على المستند');
+      }
+    } catch (error) {
+      console.error('Error updating document text:', error);
+      alert('حدث خطأ أثناء حفظ التعديلات');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -201,11 +244,52 @@ export default function App() {
                   />
                 </div>
                 <div className="w-full lg:w-[400px] border-r border-slate-100 flex flex-col bg-white">
-                  <div className="p-6 border-b border-slate-100">
-                    <h4 className="font-bold text-slate-900 mb-4">النصوص المستخرجة</h4>
-                    <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[300px] lg:max-h-none overflow-y-auto">
-                      {selectedDoc.extractedText || 'لا توجد نصوص مستخرجة'}
+                  <div className="p-6 border-b border-slate-100 flex flex-col flex-1 overflow-hidden">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-bold text-slate-900">النصوص المستخرجة</h4>
+                      {isEditingSavedDoc ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleSaveDocumentEdit}
+                            disabled={isSavingEdit}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition-colors shadow-sm"
+                          >
+                            <Save size={12} />
+                            <span>{isSavingEdit ? 'جاري الحفظ...' : 'حفظ'}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditedSavedDocText(selectedDoc.extractedText || '');
+                              setIsEditingSavedDoc(false);
+                            }}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold rounded-lg transition-colors"
+                          >
+                            <span>إلغاء</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setIsEditingSavedDoc(true)}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-[11px] font-bold rounded-lg transition-colors shadow-sm"
+                        >
+                          <Edit3 size={12} />
+                          <span>تعديل يدوياً</span>
+                        </button>
+                      )}
                     </div>
+                    {isEditingSavedDoc ? (
+                      <textarea
+                        className="w-full h-72 p-4 bg-slate-50 text-slate-800 text-base rounded-2xl border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-serif text-right resize-none"
+                        style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
+                        dir="rtl"
+                        value={editedSavedDocText}
+                        onChange={(e) => setEditedSavedDocText(e.target.value)}
+                      />
+                    ) : (
+                      <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[300px] lg:max-h-none overflow-y-auto">
+                        {selectedDoc.extractedText || 'لا توجد نصوص مستخرجة'}
+                      </div>
+                    )}
                   </div>
                   <div className="p-6 space-y-6">
                     <div>
