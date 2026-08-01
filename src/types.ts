@@ -47,9 +47,19 @@ export interface DocumentMetadata {
   originalFileName: string;
 }
 
+export interface MentionedPerson {
+  statisticalNumber: string;
+  rank: string;
+  name: string;
+}
+
 export interface Document extends DocumentMetadata {
   extractedText: string;
   fileData: string; // Base64
+  bodyText?: string;
+  attachments?: string;
+  copyTo?: string;
+  mentionedPersons?: MentionedPerson[];
 }
 
 export interface Stats {

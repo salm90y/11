@@ -28,8 +28,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
-import { Document, DocumentCategory } from '../types';
+import { Document, DocumentCategory, MentionedPerson } from '../types';
 import { normalizeAndCorrectArabicText } from '../utils/arabicPostProcessor';
+import { extractOfficialLetterMetadata, ALL_IRAQI_RANKS } from '../utils/letterParser';
 
 interface DocumentUploadProps {
   onUploadSuccess: (doc: Document) => void;
@@ -57,6 +58,10 @@ interface UploadQueueItem {
   isEditingManually: boolean;
   showEnhancedPreview: boolean;
   ocrEngine: 'python' | 'gemini';
+  bodyText: string;
+  attachments: string;
+  copyTo: string;
+  mentionedPersons: MentionedPerson[];
 }
 
 const CLASSIFICATION_KEYWORDS: Record<DocumentCategory, string[]> = {
@@ -297,7 +302,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
         originalUnrefinedText: null,
         isEditingManually: false,
         showEnhancedPreview: false,
-        ocrEngine: 'python'
+        ocrEngine: 'python',
+        bodyText: '',
+        attachments: '',
+        copyTo: '',
+        mentionedPersons: []
       });
     });
 
@@ -382,6 +391,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       const enhancedImage = data.enhanced_image || null;
 
       const category = classifyText(correctedText);
+      const parsedMetadata = extractOfficialLetterMetadata(correctedText);
       
       updateQueueItem(doc.id, {
         progress: 100,
@@ -391,7 +401,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           engine: finalEngine,
           stages,
           enhancedImage
-        }
+        },
+        bodyText: parsedMetadata.bodyText,
+        attachments: parsedMetadata.attachments,
+        copyTo: parsedMetadata.copyTo,
+        mentionedPersons: parsedMetadata.mentionedPersons
       });
     } catch (error: any) {
       console.error('OCR Error:', error);
@@ -425,7 +439,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       barcode: doc.barcodeValue,
       originalFileName: doc.file.name,
       extractedText: doc.ocrResult?.text || '',
-      fileData: doc.preview
+      fileData: doc.preview,
+      bodyText: doc.bodyText || '',
+      attachments: doc.attachments || '',
+      copyTo: doc.copyTo || '',
+      mentionedPersons: doc.mentionedPersons || []
     };
 
     try {
@@ -963,6 +981,206 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                             </motion.div>
                           )}
                         </AnimatePresence>
+                      </motion.div>
+                    )}
+
+                    {/* استخلاص هيكلية وبيانات الكتاب الإداري */}
+                    {activeDoc.ocrResult && !activeDoc.isProcessing && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-6 text-right"
+                      >
+                        <div className="border-b border-slate-100 pb-4">
+                          <h4 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <Sparkles className="text-blue-600" size={20} />
+                            استخلاص هيكلية وبيانات الكتاب الإداري ذكياً
+                          </h4>
+                          <p className="text-xs text-slate-500 mt-1">تفريغ وتحليل تلقائي لمضمون الكتاب الرسمي وتصنيفه إلى حقول مستقلة قابلة للتعديل والبحث لاحقاً.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-5">
+                          {/* 1. نص أصل القرار (ما بعد الموضوع) */}
+                          <div className="space-y-2">
+                            <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <span>📝 أصل مضمون القرار / نص الكتاب الإداري:</span>
+                              <span className="text-[10px] text-slate-400 font-normal">(تم استخلاصه تلقائياً من بعد عبارة "الموضوع" وحتى نهاية القرار)</span>
+                            </label>
+                            <textarea
+                              value={activeDoc.bodyText || ''}
+                              onChange={(e) => updateQueueItem(activeDoc.id, { bodyText: e.target.value })}
+                              rows={5}
+                              className="w-full p-3.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
+                              placeholder="مضمون أو نص القرار المستخلص..."
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            {/* 2. المرفقات */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">📎 المرفقات:</label>
+                              <input
+                                type="text"
+                                value={activeDoc.attachments || ''}
+                                onChange={(e) => updateQueueItem(activeDoc.id, { attachments: e.target.value })}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                placeholder="مثال: كتاب سري وشخصي، أو لا يوجد..."
+                              />
+                            </div>
+
+                            {/* 3. نسخة منه إلى */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">📂 نسخة منه إلى (الجهات الموجه إليها):</label>
+                              <textarea
+                                value={activeDoc.copyTo || ''}
+                                onChange={(e) => updateQueueItem(activeDoc.id, { copyTo: e.target.value })}
+                                rows={2}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                placeholder="مثال: مكتب الوزير، مديرية المالية..."
+                              />
+                            </div>
+                          </div>
+
+                          {/* 4. قائمة الأسماء والمنتسبين المذكورين في الكتاب */}
+                          <div className="space-y-3 pt-3 border-t border-slate-100">
+                            <div className="flex justify-between items-center">
+                              <div className="space-y-0.5">
+                                <label className="block text-xs font-bold text-slate-800">👥 قائمة المراتب والضباط المذكورين في الكتاب:</label>
+                                <p className="text-[10px] text-slate-400">يمكنك تعديل الأرقام الإحصائية، الرتب والأسماء المستخلصة، أو إضافة أشخاص جدد يدوياً.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...(activeDoc.mentionedPersons || []), { statisticalNumber: '', rank: 'شرطي', name: '' }];
+                                  updateQueueItem(activeDoc.id, { mentionedPersons: updated });
+                                }}
+                                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl border border-blue-200 transition-colors shadow-sm"
+                              >
+                                <Plus size={14} />
+                                <span>إضافة اسم جديد</span>
+                              </button>
+                            </div>
+
+                            {(!activeDoc.mentionedPersons || activeDoc.mentionedPersons.length === 0) ? (
+                              <div className="text-center py-6 border border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs">
+                                لم يتم العثور على أسماء أو مراتب مستخلصة تلقائياً في هذا الكتاب. انقر على "إضافة اسم جديد" للبدء بالتدوين يدوياً.
+                              </div>
+                            ) : (
+                              <div className="overflow-hidden border border-slate-200 rounded-2xl bg-slate-50/30">
+                                <table className="w-full border-collapse text-right text-xs">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                                      <th className="p-3 w-16 text-center">ت</th>
+                                      <th className="p-3 w-32">الرقم الإحصائي</th>
+                                      <th className="p-3 w-40">الرتبة / الصفة</th>
+                                      <th className="p-3">الاسم الكامل</th>
+                                      <th className="p-3 w-16 text-center">إجراءات</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {activeDoc.mentionedPersons.map((person, pIdx) => (
+                                      <tr key={pIdx} className="hover:bg-slate-50/80 bg-white">
+                                        <td className="p-3 text-center font-semibold text-slate-400">{pIdx + 1}</td>
+                                        
+                                        {/* الرقم الإحصائي */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={person.statisticalNumber}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.mentionedPersons.map((p, i) => i === pIdx ? { ...p, statisticalNumber: val } : p);
+                                              updateQueueItem(activeDoc.id, { mentionedPersons: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs"
+                                            placeholder="مثال: 543210"
+                                          />
+                                        </td>
+
+                                        {/* الرتبة */}
+                                        <td className="p-2">
+                                          <select
+                                            value={person.rank}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.mentionedPersons.map((p, i) => i === pIdx ? { ...p, rank: val } : p);
+                                              updateQueueItem(activeDoc.id, { mentionedPersons: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs"
+                                          >
+                                            <optgroup label="المراتب والمنتسبين">
+                                              <option value="شرطي">شرطي</option>
+                                              <option value="شرطي أول">شرطي أول</option>
+                                              <option value="نائب عريف">نائب عريف</option>
+                                              <option value="عريف">عريف</option>
+                                              <option value="رئيس عرفاء">رئيس عرفاء</option>
+                                              <option value="مفوض">مفوض</option>
+                                              <option value="مفوض درجة ثامنة">مفوض درجة ثامنة</option>
+                                              <option value="مفوض درجة سابعة">مفوض درجة سابعة</option>
+                                              <option value="مفوض درجة سادسة">مفوض درجة سادسة</option>
+                                              <option value="مفوض درجة خامسة">مفوض درجة خامسة</option>
+                                              <option value="مفوض درجة رابعة">مفوض درجة رابعة</option>
+                                              <option value="مفوض درجة ثالثة">مفوض درجة ثالثة</option>
+                                              <option value="مفوض درجة ثانية">مفوض درجة ثانية</option>
+                                              <option value="مفوض درجة أولى">مفوض درجة أولى</option>
+                                            </optgroup>
+                                            <optgroup label="الضباط">
+                                              <option value="ملازم">ملازم</option>
+                                              <option value="ملازم أول">ملازم أول</option>
+                                              <option value="نقيب">نقيب</option>
+                                              <option value="رائد">رائد</option>
+                                              <option value="مقدم">مقدم</option>
+                                              <option value="عقيد">عقيد</option>
+                                              <option value="عميد">عميد</option>
+                                              <option value="لواء">لواء</option>
+                                              <option value="فريق">فريق</option>
+                                              <option value="فريق أول">فريق أول</option>
+                                            </optgroup>
+                                            <optgroup label="أخرى">
+                                              <option value="منتسب">منتسب</option>
+                                              <option value="موظف مدني">موظف مدني</option>
+                                            </optgroup>
+                                          </select>
+                                        </td>
+
+                                        {/* الاسم الكامل */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={person.name}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.mentionedPersons.map((p, i) => i === pIdx ? { ...p, name: val } : p);
+                                              updateQueueItem(activeDoc.id, { mentionedPersons: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs"
+                                            placeholder="الاسم الرباعي واللقب..."
+                                          />
+                                        </td>
+
+                                        {/* حذف الصف */}
+                                        <td className="p-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = activeDoc.mentionedPersons.filter((_, i) => i !== pIdx);
+                                              updateQueueItem(activeDoc.id, { mentionedPersons: updated });
+                                            }}
+                                            className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                                            title="إزالة هذا الاسم"
+                                          >
+                                            <X size={14} />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
                       </motion.div>
                     )}
 

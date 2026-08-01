@@ -8,7 +8,7 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import DocumentUpload from './components/DocumentUpload';
 import DocumentList from './components/DocumentList';
-import { Document, Stats, UserRole } from './types';
+import { Document, Stats, UserRole, MentionedPerson } from './types';
 import { 
   Bell, 
   Search as SearchIcon, 
@@ -19,7 +19,8 @@ import {
   Printer,
   Edit3,
   Save,
-  Check
+  Check,
+  Sparkles
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -38,11 +39,19 @@ export default function App() {
   // حالات تعديل الوثيقة المحفوظة يدوياً
   const [isEditingSavedDoc, setIsEditingSavedDoc] = useState(false);
   const [editedSavedDocText, setEditedSavedDocText] = useState('');
+  const [editedSavedDocBodyText, setEditedSavedDocBodyText] = useState('');
+  const [editedSavedDocAttachments, setEditedSavedDocAttachments] = useState('');
+  const [editedSavedDocCopyTo, setEditedSavedDocCopyTo] = useState('');
+  const [editedSavedDocMentionedPersons, setEditedSavedDocMentionedPersons] = useState<MentionedPerson[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     if (selectedDoc) {
       setEditedSavedDocText(selectedDoc.extractedText || '');
+      setEditedSavedDocBodyText(selectedDoc.bodyText || '');
+      setEditedSavedDocAttachments(selectedDoc.attachments || '');
+      setEditedSavedDocCopyTo(selectedDoc.copyTo || '');
+      setEditedSavedDocMentionedPersons(selectedDoc.mentionedPersons || []);
       setIsEditingSavedDoc(false);
     }
   }, [selectedDoc]);
@@ -83,7 +92,13 @@ export default function App() {
       const response = await fetch(`/api/documents/${selectedDoc.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ extractedText: editedSavedDocText })
+        body: JSON.stringify({
+          extractedText: editedSavedDocText,
+          bodyText: editedSavedDocBodyText,
+          attachments: editedSavedDocAttachments,
+          copyTo: editedSavedDocCopyTo,
+          mentionedPersons: editedSavedDocMentionedPersons
+        })
       });
       if (response.ok) {
         const data = await response.json();
@@ -243,8 +258,8 @@ export default function App() {
                     className="max-w-full max-h-full rounded-lg shadow-2xl"
                   />
                 </div>
-                <div className="w-full lg:w-[400px] border-r border-slate-100 flex flex-col bg-white">
-                  <div className="p-6 border-b border-slate-100 flex flex-col flex-1 overflow-hidden">
+                <div className="w-full lg:w-[500px] border-r border-slate-100 flex flex-col bg-white overflow-y-auto">
+                  <div className="p-6 border-b border-slate-100 flex flex-col">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="font-bold text-slate-900">النصوص المستخرجة</h4>
                       {isEditingSavedDoc ? (
@@ -260,6 +275,10 @@ export default function App() {
                           <button
                             onClick={() => {
                               setEditedSavedDocText(selectedDoc.extractedText || '');
+                              setEditedSavedDocBodyText(selectedDoc.bodyText || '');
+                              setEditedSavedDocAttachments(selectedDoc.attachments || '');
+                              setEditedSavedDocCopyTo(selectedDoc.copyTo || '');
+                              setEditedSavedDocMentionedPersons(selectedDoc.mentionedPersons || []);
                               setIsEditingSavedDoc(false);
                             }}
                             className="flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold rounded-lg transition-colors"
@@ -286,10 +305,183 @@ export default function App() {
                         onChange={(e) => setEditedSavedDocText(e.target.value)}
                       />
                     ) : (
-                      <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[300px] lg:max-h-none overflow-y-auto">
+                      <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto">
                         {selectedDoc.extractedText || 'لا توجد نصوص مستخرجة'}
                       </div>
                     )}
+
+                    {/* حقول هيكلية الكتاب الإداري المستخلصة */}
+                    <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
+                      <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                        <Sparkles className="text-blue-600" size={16} />
+                        بيانات وهيكلية الكتاب الإداري المستخلصة
+                      </h4>
+
+                      {isEditingSavedDoc ? (
+                        <div className="space-y-4">
+                          {/* 1. نص أصل القرار */}
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">📝 مضمون القرار / نص الكتاب الإداري:</label>
+                            <textarea
+                              value={editedSavedDocBodyText}
+                              onChange={(e) => setEditedSavedDocBodyText(e.target.value)}
+                              rows={4}
+                              className="w-full p-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="مضمون القرار..."
+                            />
+                          </div>
+
+                          {/* 2. المرفقات */}
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">📎 المرفقات:</label>
+                            <input
+                              type="text"
+                              value={editedSavedDocAttachments}
+                              onChange={(e) => setEditedSavedDocAttachments(e.target.value)}
+                              className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="المرفقات..."
+                            />
+                          </div>
+
+                          {/* 3. نسخة منه إلى */}
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">📂 نسخة منه إلى:</label>
+                            <textarea
+                              value={editedSavedDocCopyTo}
+                              onChange={(e) => setEditedSavedDocCopyTo(e.target.value)}
+                              rows={2}
+                              className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="نسخة منه إلى..."
+                            />
+                          </div>
+
+                          {/* 4. قائمة الأسماء والمنتسبين المذكورين */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <div className="flex justify-between items-center">
+                              <label className="block text-xs font-bold text-slate-700">👥 المراتب والضباط المذكورين:</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditedSavedDocMentionedPersons([...editedSavedDocMentionedPersons, { statisticalNumber: '', rank: 'شرطي', name: '' }])}
+                                className="text-[11px] text-blue-600 font-bold hover:underline"
+                              >
+                                + إضافة اسم
+                              </button>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-100">
+                              {editedSavedDocMentionedPersons.map((p, pIdx) => (
+                                <div key={pIdx} className="flex gap-1.5 items-center bg-white p-1.5 rounded-lg shadow-sm border border-slate-100">
+                                  <input
+                                    type="text"
+                                    placeholder="رقم إحصائي"
+                                    value={p.statisticalNumber}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocMentionedPersons(editedSavedDocMentionedPersons.map((x, i) => i === pIdx ? { ...x, statisticalNumber: val } : x));
+                                    }}
+                                    className="w-16 px-1.5 py-1 text-[10px] border border-slate-200 rounded-md"
+                                  />
+                                  <select
+                                    value={p.rank}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocMentionedPersons(editedSavedDocMentionedPersons.map((x, i) => i === pIdx ? { ...x, rank: val } : x));
+                                    }}
+                                    className="w-20 px-1 py-1 text-[10px] border border-slate-200 rounded-md"
+                                  >
+                                    <option value="شرطي">شرطي</option>
+                                    <option value="عريف">عريف</option>
+                                    <option value="مفوض">مفوض</option>
+                                    <option value="ملازم">ملازم</option>
+                                    <option value="نقيب">نقيب</option>
+                                    <option value="رائد">رائد</option>
+                                    <option value="مقدم">مقدم</option>
+                                    <option value="عقيد">عقيد</option>
+                                    <option value="عميد">عميد</option>
+                                    <option value="لواء">لواء</option>
+                                    <option value="فريق">فريق</option>
+                                    <option value="فريق أول">فريق أول</option>
+                                    <option value="منتسب">منتسب</option>
+                                    <option value="موظف مدني">موظف مدني</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    placeholder="الاسم"
+                                    value={p.name}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocMentionedPersons(editedSavedDocMentionedPersons.map((x, i) => i === pIdx ? { ...x, name: val } : x));
+                                    }}
+                                    className="flex-1 px-1.5 py-1 text-[10px] border border-slate-200 rounded-md"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditedSavedDocMentionedPersons(editedSavedDocMentionedPersons.filter((_, i) => i !== pIdx))}
+                                    className="text-red-500 text-xs font-bold px-1 hover:text-red-700"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {/* عرض مضمون القرار المستخلص */}
+                          {selectedDoc.bodyText && (
+                            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
+                              <p className="font-bold text-slate-800 mb-1">📝 مضمون القرار / نص الكتاب:</p>
+                              <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedDoc.bodyText}</p>
+                            </div>
+                          )}
+
+                          {/* عرض المرفقات */}
+                          {selectedDoc.attachments && (
+                            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
+                              <span className="font-bold text-slate-800">📎 المرفقات: </span>
+                              <span className="text-slate-600">{selectedDoc.attachments}</span>
+                            </div>
+                          )}
+
+                          {/* عرض نسخة منه إلى */}
+                          {selectedDoc.copyTo && (
+                            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
+                              <p className="font-bold text-slate-800 mb-1">📂 نسخة منه إلى:</p>
+                              <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedDoc.copyTo}</p>
+                            </div>
+                          )}
+
+                          {/* عرض المنتسبين المذكورين */}
+                          {selectedDoc.mentionedPersons && selectedDoc.mentionedPersons.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="font-bold text-xs text-slate-800">👥 المراتب والضباط المذكورين في الكتاب:</p>
+                              <div className="overflow-hidden border border-slate-150 rounded-xl bg-slate-50/50">
+                                <table className="w-full border-collapse text-right text-[11px]">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                                      <th className="p-2 text-center w-8">ت</th>
+                                      <th className="p-2 w-20">رقم إحصائي</th>
+                                      <th className="p-2 w-20">الرتبة</th>
+                                      <th className="p-2">الاسم الكامل</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {selectedDoc.mentionedPersons.map((person, pIdx) => (
+                                      <tr key={pIdx} className="hover:bg-white bg-slate-50/30">
+                                        <td className="p-2 text-center font-semibold text-slate-400">{pIdx + 1}</td>
+                                        <td className="p-2 text-slate-600 font-mono">{person.statisticalNumber || '-'}</td>
+                                        <td className="p-2 font-bold text-blue-800">{person.rank}</td>
+                                        <td className="p-2 text-slate-800 font-medium">{person.name}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="p-6 space-y-6">
                     <div>
