@@ -50,8 +50,15 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [ocrEngine, setOcrEngine] = useState<'gemini' | 'python'>('gemini');
-  const [ocrResult, setOcrResult] = useState<{ text: string; category: string; engine?: string } | null>(null);
+  const [ocrEngine, setOcrEngine] = useState<'gemini' | 'python'>('python');
+  const [ocrResult, setOcrResult] = useState<{ 
+    text: string; 
+    category: string; 
+    engine?: string;
+    stages?: Array<{ stage: number; title: string; details: string }>;
+    enhancedImage?: string;
+  } | null>(null);
+  const [showEnhancedPreview, setShowEnhancedPreview] = useState(false);
   const [docTitle, setDocTitle] = useState('');
   const [barcodeValue, setBarcodeValue] = useState('');
   const [progress, setProgress] = useState(0);
@@ -147,11 +154,19 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       // معالجة القاموس والتصحيح العربي المحلي
       const correctedText = normalizeAndCorrectArabicText(rawText);
       const finalEngine = data.engine || usedEngineName;
+      const stages = data.stages || [];
+      const enhancedImage = data.enhanced_image || null;
       
       setProgress(100);
       
       const category = classifyText(correctedText);
-      setOcrResult({ text: correctedText, category, engine: finalEngine });
+      setOcrResult({ 
+        text: correctedText, 
+        category, 
+        engine: finalEngine,
+        stages,
+        enhancedImage
+      });
     } catch (error: any) {
       console.error('OCR Error:', error);
       alert(`حدث خطأ أثناء معالجة المستند:\n${error.message || 'خطأ غير معروف'}`);
@@ -358,13 +373,44 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           {ocrResult.engine && (
                             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                               <span className="px-2.5 py-0.5 bg-blue-950 text-blue-300 text-[11px] font-semibold rounded-md border border-blue-800/50">
-                                المحرك المستخدَم: {ocrResult.engine}
+                                المحرك: {ocrResult.engine}
                               </span>
-                              <span className="text-[11px] text-slate-400">
-                                خط الوورد الافتراضي (Traditional Arabic)
-                              </span>
+                              {ocrResult.enhancedImage && (
+                                <button
+                                  onClick={() => setShowEnhancedPreview(!showEnhancedPreview)}
+                                  className="text-[11px] px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                                >
+                                  {showEnhancedPreview ? 'إخفاء المعاينة المحسنة' : 'معاينة الصورة المعدلة 2.5x (أبيض وأسود)'}
+                                </button>
+                              )}
                             </div>
                           )}
+
+                          {showEnhancedPreview && ocrResult.enhancedImage && (
+                            <div className="p-2 bg-slate-950 rounded-xl border border-slate-800">
+                              <p className="text-[10px] text-blue-400 mb-1 font-bold">صورة الوثيقة بعد التكبير 2.5x وتعديل الميلان والتباين (High-Contrast Binarization):</p>
+                              <img src={ocrResult.enhancedImage} alt="Enhanced" className="max-h-48 rounded border border-slate-700 object-contain mx-auto" />
+                            </div>
+                          )}
+
+                          {/* عرض مراحل الذكاء الاصطناعي الأوفلاين الأربعة */}
+                          {ocrResult.stages && ocrResult.stages.length > 0 && (
+                            <div className="p-2.5 bg-slate-950/80 rounded-xl border border-blue-900/40 text-right space-y-2">
+                              <div className="flex items-center gap-1.5 text-blue-400 font-bold text-xs">
+                                <Sparkles size={13} />
+                                <span>مراحل معالجة الذكاء الاصطناعي الأوفلاين المكتملة (4 Stages):</span>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-[10px]">
+                                {ocrResult.stages.map((stg) => (
+                                  <div key={stg.stage} className="bg-slate-900/90 p-2 rounded-lg border border-slate-800/80">
+                                    <span className="font-bold text-blue-300 block mb-0.5">{stg.title}</span>
+                                    <span className="text-slate-400 leading-tight block">{stg.details}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           <div 
                             className="text-slate-100 text-base leading-loose whitespace-pre-wrap font-serif tracking-normal text-right p-2 bg-slate-950/60 rounded-xl border border-slate-800/80"
                             style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
