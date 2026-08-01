@@ -193,9 +193,6 @@ ${text}
 ---`;
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500); // 3.5 seconds timeout
-
       const response = await fetch(ollamaUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -207,10 +204,8 @@ ${text}
             temperature: 0.1,
             top_p: 0.9
           }
-        }),
-        signal: controller.signal
+        })
       });
-      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`Ollama returned status ${response.status}`);
