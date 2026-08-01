@@ -165,6 +165,78 @@ ${text}
   }
 });
 
+// Ollama Local Offline Refinement Proxy Endpoint
+app.post('/api/ollama-refine', async (req, res) => {
+  try {
+    const { text, model = 'qwen2.5', host = 'http://127.0.0.1:11434' } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'لم يتم توفير أي نص للتدقيق' });
+    }
+
+    const ollamaUrl = `${host.replace(/\/$/, '')}/api/generate`;
+
+    const prompt = `أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية العريقة والحديثة.
+
+قم بمطابقة الكلمات اللغوية مع أصولها العربية الفصحى وتصحيح وتصويب كافة الأخطاء الإملائية والتركيبية والتحريفات الناتجة عن عملية سحب النصوص والـ OCR بدقة كاملة وبدون أي نقصان.
+
+التعليمات الصارمة:
+1. تصحيح الحروف والكلمات المشوهة بسبب مد الحروف (الكشيدة) أو التشوهات مثل استبدال "تساريخ" بـ "تاريخ"، "المحسال" بـ "المحال"، "السى التقاعد" بـ "إلى التقاعد"، "تقيسده" بـ "تقيده"، "المهنسي" بـ "المهني".
+2. تجميع الحروف العربية المتباعدة والمقطوعة داخل الكلمة الواحدة (مثل "بقواع د" -> "بقواعد"، "حس ين" -> "حسين"، "تقا عد" -> "تقاعد").
+3. فصل الكلمات المدمجة الملتصقة بدون مسافات (مثل "حسينكاملجابرشمخي" -> "حسين كامل جابر شمخي"، "تاريخانفكاك" -> "تاريخ انفكاك").
+4. تصحيح وتصويب أسماء الوزارات والمديريات والمواد والقوانين والتشريعات العراقية والرسمية بدقة (مثل "قانون أصول المحاكمات الجزائية لقوى الأمن الداخلي رقم (17) لسنة 2008").
+5. الحفاظ التام على أسلوب وهيكلية الكتاب الرسمي وحقول الترويسة والعدد والتاريخ والجدول والتذييل دون حذف أو تلخيص أو تعديل للمعنى الإداري.
+6. اكتب النص المنقح النهائي المصحح بالكامل فقط، وبدون أي مقدمات أو شرح أو حواشي أو علامات ترقيم زائدة.
+
+النص المطلوب تدقيقه وتصحيحه بالكامل:
+---
+${text}
+---`;
+
+    try {
+      const response = await fetch(ollamaUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          prompt,
+          stream: false,
+          options: {
+            temperature: 0.1,
+            top_p: 0.9
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const refinedText = data.response ? data.response.trim() : '';
+
+      if (!refinedText) {
+        throw new Error("استجابة فارغة من نموذج Ollama");
+      }
+
+      const finalPolished = normalizeAndCorrectArabicText(refinedText);
+
+      return res.json({
+        success: true,
+        text: finalPolished,
+        method: `نموذج Ollama المحلي أوفلاين (${model})`
+      });
+    } catch (connErr: any) {
+      return res.json({
+        success: false,
+        error: `فشل الاتصال بـ Ollama على العنوان ${host}. تأكد من أن تطبيق Ollama يعمل في الخلفية ومن سحبك للنموذج المطلوب بالكامل عبر تشغيل الأمر التالي في سطر الأوامر (CMD):\n\`ollama run ${model}\`\n\nالخطأ التفصيلي: ${connErr.message || connErr}`
+      });
+    }
+  } catch (error: any) {
+    console.error('Ollama Refine Error:', error);
+    return res.status(500).json({ success: false, error: error.message || 'حدث خطأ غير متوقع' });
+  }
+});
+
 // Documents API
 app.get('/api/documents', (req, res) => {
   res.json(db.documents);

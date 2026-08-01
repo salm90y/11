@@ -767,6 +767,79 @@ def refine_text_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ollama-refine', methods=['POST', 'OPTIONS'])
+def ollama_refine_api():
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    try:
+        data = request.get_json(force=True)
+        if not data or 'text' not in data:
+            return jsonify({'error': 'لم يتم توفير نص للتنقيح'}), 400
+
+        text = data.get('text', '')
+        model = data.get('model', 'qwen2.5')
+        ollama_host = data.get('host', 'http://127.0.0.1:11434').rstrip('/')
+
+        import urllib.request
+        import json
+
+        prompt = (
+            "أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية العريقة والحديثة.\n\n"
+            "قم بمطابقة الكلمات اللغوية مع أصولها العربية الفصحى وتصحيح وتصويب كافة الأخطاء الإملائية والتركيبية والتحريفات الناتجة عن عملية سحب النصوص والـ OCR بدقة كاملة وبدون أي نقصان.\n\n"
+            "التعليمات الصارمة:\n"
+            "1. تصحيح الحروف والكلمات المشوهة بسبب مد الحروف (الكشيدة) أو التشوهات مثل استبدال \"تساريخ\" بـ \"تاريخ\"، \"المحسال\" بـ \"المحال\"، \"السى التقاعد\" بـ \"إلى التقاعد\"، \"تقيسده\" بـ \"تقيده\"، \"المهنسي\" بـ \"المهني\".\n"
+            "2. تجميع الحروف العربية المتباعدة والمقطوعة داخل الكلمة الواحدة (مثل \"بقواع د\" -> \"بقواعد\"، \"حس ين\" -> \"حسين\"، \"تقا عد\" -> \"تقاعد\"، \"انف كاك\" -> \"انفكاك\").\n"
+            "3. فصل الكلمات المدمجة الملتصقة بدون مسافات (مثل \"حسينكاملجابرشمخي\" -> \"حسين كامل جابر شمخي\"، \"تاريخانفكاك\" -> \"تاريخ انفكاك\"، \"بناءاعلى\" -> \"بناءً على\").\n"
+            "4. تصحيح وتصويب أسماء الوزارات والمديريات والمواد والقوانين والتشريعات العراقية والرسمية بدقة (مثل \"قانون أصول المحاكمات الجزائية لقوى الأمن الداخلي رقم (17) لسنة 2008\"، \"وكالة الوزارة لشؤون الشرطة\").\n"
+            "5. الحفاظ التام على أسلوب وهيكلية الكتاب الرسمي وحقول الترويسة والعدد والتاريخ والجدول والتذييل دون حذف أو تلخيص أو تعديل للمعنى الإداري.\n"
+            "6. اكتب النص المنقح النهائي المصحح بالكامل فقط، وبدون أي مقدمات أو شرح أو حواشي أو علامات ترقيم زائدة.\n\n"
+            f"النص المطلوب تدقيقه وتصحيحه بالكامل:\n---\n{text}\n---"
+        )
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.1,
+                "top_p": 0.9
+            }
+        }
+
+        req_data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            f"{ollama_host}/api/generate",
+            data=req_data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=45) as response:
+                resp_data = json.loads(response.read().decode('utf-8'))
+                refined_text = resp_data.get('response', '').strip()
+                if not refined_text:
+                    raise Exception("استجابة فارغة من نموذج Ollama")
+                
+                # تطبيق الملمع المورفولوجي المحلي لضمان أفضل نتيجة إضافية
+                final_polished = apply_nlp_legal_refiner(refined_text)
+
+                return jsonify({
+                    'success': True,
+                    'text': final_polished,
+                    'method': f'نموذج Ollama المحلي أوفلاين ({model})'
+                })
+        except Exception as conn_err:
+            return jsonify({
+                'success': False,
+                'error': f"فشل الاتصال بـ Ollama على العنوان {ollama_host}. تأكد من أن تطبيق Ollama يعمل في الخلفية ومن سحبك للنموذج المطلوب بالكامل عبر تشغيل الأمر التالي في سطر الأوامر (CMD):\n`ollama run {model}`\n\nالخطأ التفصيلي: {str(conn_err)}"
+            }), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"حدث خطأ أثناء معالجة Ollama: {str(e)}"}), 500
+
+
 if __name__ == '__main__':
     print("=" * 75)
     print("🌐 سيرفر النماذج متعددة المراحل يعمل أوفلاين على: http://127.0.0.1:5000")

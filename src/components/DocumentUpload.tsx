@@ -19,7 +19,10 @@ import {
   Check,
   Wand2,
   CheckCircle2,
-  RotateCcw
+  RotateCcw,
+  Cpu,
+  Settings,
+  HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -72,6 +75,94 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const [isRefined, setIsRefined] = useState(false);
   const [refinementMethod, setRefinementMethod] = useState<string | null>(null);
   const [originalUnrefinedText, setOriginalUnrefinedText] = useState<string | null>(null);
+
+  // إعدادات Ollama للتدقيق الأوفلاين المحلي
+  const [ollamaModel, setOllamaModel] = useState(() => localStorage.getItem('ollamaModel') || 'qwen2.5');
+  const [ollamaHost, setOllamaHost] = useState(() => localStorage.getItem('ollamaHost') || 'http://127.0.0.1:11434');
+  const [showOllamaSettings, setShowOllamaSettings] = useState(false);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
+
+  const handleOllamaModelChange = (val: string) => {
+    setOllamaModel(val);
+    localStorage.setItem('ollamaModel', val);
+  };
+
+  const handleOllamaHostChange = (val: string) => {
+    setOllamaHost(val);
+    localStorage.setItem('ollamaHost', val);
+  };
+
+  const handleOllamaRefine = async () => {
+    if (!ocrResult?.text) return;
+    setIsRefining(true);
+    setOllamaError(null);
+    try {
+      if (!originalUnrefinedText) {
+        setOriginalUnrefinedText(ocrResult.text);
+      }
+
+      let res: Response | null = null;
+      const payload = {
+        text: ocrResult.text,
+        model: ollamaModel,
+        host: ollamaHost
+      };
+
+      try {
+        const url = ocrEngine === 'python' 
+          ? 'http://127.0.0.1:5000/api/ollama-refine' 
+          : '/api/ollama-refine';
+
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        // Fallback to node backend proxy
+        try {
+          res = await fetch('/api/ollama-refine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } catch (err2) {
+          // Direct fetch
+          try {
+            res = await fetch(`${ollamaHost}/api/generate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: ollamaModel,
+                prompt: `أنت خبير فائق الذكاء والاحترافية في تدقيق وتنقيح وتصحيح النصوص العربية المستخرجة عبر الـ OCR للكتب الرسمية والأوامر الإدارية والقرارات الحكومية. قم بتقديم تصحيح وتدقيق لغوي كامل ومطابقة الكلمات مع أصولها العربية الفصحى. اكتب النص النهائي المصحح بالكامل فقط، وبدون أي مقدمات أو شرح.\n\nالنص المطلوب تدقيقه:\n${ocrResult.text}`,
+                stream: false
+              })
+            });
+          } catch (err3) {
+            throw new Error(`تعذر الاتصال بخدمة Ollama المحلية على العنوان: ${ollamaHost}. يرجى التأكد من تشغيل Ollama EXE في الخلفية.`);
+          }
+        }
+      }
+
+      if (!res || !res.ok) {
+        throw new Error('فشل طلب تنقيح وتعديل النص عبر Ollama');
+      }
+
+      const data = await res.json();
+      if (data.success && data.text) {
+        setOcrResult(prev => prev ? { ...prev, text: data.text } : null);
+        setIsRefined(true);
+        setRefinementMethod(data.method || `نموذج Ollama المحلي أوفلاين (${ollamaModel})`);
+      } else {
+        throw new Error(data.error || 'حدث خطأ غير معروف أثناء التدقيق بـ Ollama');
+      }
+    } catch (err: any) {
+      console.error('Ollama Refine error:', err);
+      setOllamaError(err.message || 'فشل الاتصال بـ Ollama');
+    } finally {
+      setIsRefining(false);
+    }
+  };
 
   const handleRefineText = async (mode: 'ai' | 'offline' = 'ai') => {
     if (!ocrResult?.text) return;
@@ -292,6 +383,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     setIsRefined(false);
     setRefinementMethod(null);
     setOriginalUnrefinedText(null);
+    setOllamaError(null);
   };
 
   return (
@@ -520,9 +612,9 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                     <motion.div 
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-3 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl border border-blue-800/60 shadow-lg space-y-2"
+                      className="p-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl border border-blue-800/60 shadow-lg space-y-3"
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-2">
                           <div className="p-2 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/30 shadow-inner">
                             <Wand2 size={18} className="animate-pulse text-amber-300" />
@@ -544,7 +636,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center flex-wrap gap-2">
                           {isRefined && originalUnrefinedText && (
                             <button
                               onClick={handleUndoRefinement}
@@ -564,6 +656,27 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                             <Server size={13} className="text-blue-400" />
                             <span>تنقيح أوفلاين</span>
                           </button>
+
+                          {/* زر التدقيق والتحسين بواسطة Ollama */}
+                          <button
+                            disabled={isRefining}
+                            onClick={handleOllamaRefine}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-900/80 hover:bg-indigo-850 text-indigo-100 text-xs font-bold rounded-xl border border-indigo-700/60 transition-all shadow-md hover:shadow-indigo-500/10 active:scale-95 disabled:opacity-50"
+                            title="تدقيق وتصحيح لغوي فائق الدقة أوفلاين باستخدام تطبيق Ollama المثبت على جهازك"
+                          >
+                            <Cpu size={13} className="text-amber-400 animate-pulse" />
+                            <span>🦙 تدقيق Ollama أوفلاين</span>
+                          </button>
+
+                          {/* زر إعدادات Ollama */}
+                          <button
+                            onClick={() => setShowOllamaSettings(!showOllamaSettings)}
+                            className={`p-1.5 rounded-xl border transition-all ${showOllamaSettings ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-850 text-slate-400 border-slate-700 hover:text-white'}`}
+                            title="إعدادات Ollama"
+                          >
+                            <Settings size={14} />
+                          </button>
+
                           <button
                             disabled={isRefining}
                             onClick={() => handleRefineText('ai')}
@@ -574,10 +687,83 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                             ) : (
                               <Wand2 size={15} className="text-amber-300" />
                             )}
-                            <span>✨ تنقيح وتعديل النص بالذكاء الاصطناعي</span>
+                            <span>✨ تنقيح ذكي (Gemini)</span>
                           </button>
                         </div>
                       </div>
+
+                      {/* لوحة أخطاء وإعدادات Ollama */}
+                      <AnimatePresence>
+                        {(showOllamaSettings || ollamaError) && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden border-t border-slate-800/80 pt-3 space-y-3"
+                          >
+                            {ollamaError && (
+                              <div className="p-3 bg-red-950/40 border border-red-850 rounded-xl text-red-200 text-xs leading-relaxed">
+                                <p className="font-bold flex items-center gap-1.5 mb-1 text-red-300">
+                                  <span>⚠️ فشل الاتصال بخدمة Ollama:</span>
+                                </p>
+                                <p className="whitespace-pre-line">{ollamaError}</p>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800/40">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">اسم نموذج Ollama المستخدم:</label>
+                                <input 
+                                  type="text"
+                                  value={ollamaModel}
+                                  onChange={(e) => handleOllamaModelChange(e.target.value)}
+                                  placeholder="مثال: qwen2.5 أو llama3"
+                                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 text-white rounded-xl text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  تأكد من كتابة اسم النموذج بشكل مطابق تماماً لما تم تحميله في Ollama.
+                                </p>
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-400 mb-1">رابط خدمة Ollama المحلية:</label>
+                                <input 
+                                  type="text"
+                                  value={ollamaHost}
+                                  onChange={(e) => handleOllamaHostChange(e.target.value)}
+                                  placeholder="http://127.0.0.1:11434"
+                                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 text-white rounded-xl text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none ltr"
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  العنوان الافتراضي لـ Ollama هو http://127.0.0.1:11434.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="p-3 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-2">
+                              <h6 className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
+                                <HelpCircle size={14} />
+                                <span>طريقة تشغيل وتجهيز أداة Ollama أوفلاين بالكامل:</span>
+                              </h6>
+                              <ul className="text-[11px] text-slate-300 space-y-1 list-decimal list-inside pr-1 leading-relaxed">
+                                <li>
+                                  تأكد من تشغيل برنامج <strong className="text-white">Ollama Windows</strong> على حاسوبك (تظهر أيقونة البرنامج بجانب ساعة نظام ويندوز).
+                                </li>
+                                <li>
+                                  افتح سطر الأوامر أو موجه الأوامر (<strong className="text-white">CMD</strong>) على حاسوبك، واكتب الأمر التالي لتثبيت وتشغيل نموذج اللغة العربية الفائق Qwen:
+                                  <div className="mt-1.5 p-2 bg-slate-950 text-emerald-400 rounded-lg font-mono text-[11px] text-left select-all border border-slate-800 flex justify-between items-center">
+                                    <span>ollama run qwen2.5</span>
+                                    <span className="text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">انقر للتحديد والنسخ</span>
+                                  </div>
+                                </li>
+                                <li>
+                                  عند تشغيل النموذج وسحب النص، اضغط على زر <strong className="text-white">تدقيق Ollama أوفلاين</strong> أعلاه ليقوم بتعديل وتدقيق النص كاملاً وبشكل فوري بدون إنترنت.
+                                </li>
+                              </ul>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </motion.div>
                   )}
                 </div>
