@@ -321,6 +321,61 @@ def fix_tatweel_and_false_seen_corruption(text: str) -> str:
     return text
 
 
+ARABIC_PREFIXES = ["وال", "بال", "كال", "فال", "لل", "ال", "و", "ب", "ف", "ل", "ك"]
+ARABIC_SUFFIXES = ["تمون", "تكم", "ونا", "كما", "هم", "هن", "نا", "كم", "ها", "ين", "ون", "ات", "ه", "ة", "ي", "ا"]
+
+
+def correct_single_word_python(word: str) -> str:
+    clean_word = re.sub(r'[^\u0600-\u06FF]', '', word)
+    if len(clean_word) <= 2 or not clean_word:
+        return word
+        
+    if clean_word in LOCAL_ARABIC_DICTIONARY:
+        return word
+
+    # Try prefix/suffix stripping to find matching stem
+    detected_prefix = ""
+    detected_suffix = ""
+    stem = clean_word
+
+    # Check prefixes
+    for pref in ARABIC_PREFIXES:
+        if clean_word.startswith(pref) and len(clean_word) - len(pref) >= 3:
+            detected_prefix = pref
+            stem = clean_word[len(pref):]
+            break
+
+    # Check suffixes on the stem
+    for suff in ARABIC_SUFFIXES:
+        if stem.endswith(suff) and len(stem) - len(suff) >= 3:
+            detected_suffix = suff
+            stem = stem[:-len(suff)]
+            break
+
+    # If the stem is valid in the dictionary
+    if stem in LOCAL_ARABIC_DICTIONARY:
+        reconstructed = detected_prefix + stem + detected_suffix
+        if reconstructed.endswith("يي"):
+            reconstructed = reconstructed[:-1]
+        return word.replace(clean_word, reconstructed)
+
+    # Check if we can find a close dictionary match for the stem
+    matches = difflib.get_close_matches(stem, LOCAL_ARABIC_DICTIONARY, n=1, cutoff=0.70)
+    if matches:
+        matched_stem = matches[0]
+        reconstructed = detected_prefix + matched_stem + detected_suffix
+        if reconstructed.endswith("يي"):
+            reconstructed = reconstructed[:-1]
+        return word.replace(clean_word, reconstructed)
+
+    # Fallback: match full word directly
+    matches_full = difflib.get_close_matches(clean_word, LOCAL_ARABIC_DICTIONARY, n=1, cutoff=0.74)
+    if matches_full:
+        return word.replace(clean_word, matches_full[0])
+
+    return word
+
+
 def fix_garbled_words_with_dictionary(text: str) -> str:
     """
     4. استخدام خوارزمية Levenshtein & Difflib لمطابقة الكلمات المشوهة مع المعجم الأوفلاين
@@ -329,27 +384,7 @@ def fix_garbled_words_with_dictionary(text: str) -> str:
         return ""
     
     words = text.split()
-    corrected_words = []
-    
-    for word in words:
-        clean_word = re.sub(r'[^\u0600-\u06FF]', '', word)
-        if len(clean_word) <= 2 or not clean_word:
-            corrected_words.append(word)
-            continue
-            
-        if clean_word in LOCAL_ARABIC_DICTIONARY:
-            corrected_words.append(word)
-            continue
-
-        # البحث عن أقرب كلمة في القاموس بفارق تشابه عالي
-        matches = difflib.get_close_matches(clean_word, LOCAL_ARABIC_DICTIONARY, n=1, cutoff=0.82)
-        if matches:
-            best_match = matches[0]
-            replaced = word.replace(clean_word, best_match)
-            corrected_words.append(replaced)
-        else:
-            corrected_words.append(word)
-            
+    corrected_words = [correct_single_word_python(w) for w in words]
     return " ".join(corrected_words)
 
 

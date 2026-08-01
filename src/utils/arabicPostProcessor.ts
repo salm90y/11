@@ -1,7 +1,40 @@
 /**
  * Arabic OCR Post-Processing & Morphological NLP Engine
- * محرك معالجة وتصحيح نصوص OCR للوثائق والكتب الرسمية ومعالجة تشوهات مد الحروف (الكشيدة)
+ * محرك معالجة وتصحيح نصوص OCR للوثائق والكتب الرسمية ومعالجة تشوهات مد الحروف (الكشيدة) أوفلاين
  */
+
+// معجم الجذور والكلمات الصحيحة للكتب الرسمية العراقية والعربية
+export const ARABIC_DICTIONARY = new Set([
+  // جهات رسمية وحكومية
+  "جمهورية", "وزارة", "الداخلية", "الدفاع", "المالية", "العدل", "الصحة", "التربية", "التعليم", "العالي",
+  "النفط", "الكهرباء", "التخطيط", "الخارجية", "النقل", "الموارد", "الزراعة", "وكالة", "لشؤون", "الشرطة", "الأمن",
+  "الاتحادية", "الوطني", "المرور", "مديرية", "قسم", "شعبة", "وحدة", "إدارة", "الملاك", "التقاعد", "العامة", "القيادة",
+  "اللواء", "الفوج", "الكتيبة", "السرية", "المقر", "الفصيل", "المنتسبين", "الراتب", "الإدارة", "شخصي", "خدمة", "العقوبة",
+  "الطاقة", "العقود", "الحسابات", "القانونية", "المظالم", "الشكاوى", "الاستخبارات", "التحقيقات", "شعب", "مؤسسة",
+
+  // رتب عسكرية وأمنية
+  "فريق", "لواء", "عميد", "عقيد", "مقدم", "رائد", "نقيب", "ملازم", "مفوض", "عريف", "نائب", "شرطي", "منتسب", "ضابط", "ضباط", "مراتب",
+
+  // مصطلحات إدارية وقانونية وقرارات
+  "ندرج", "لكم", "أدناه", "ادناه", "تاريخ", "انفكاك", "منسوبنا", "المحال", "إلى", "لعدم", "تقيده", "بقواعد", "السلوك", "المهني",
+  "استنادا", "أحكام", "قانون", "دستور", "المادة", "أولا", "ثانيا", "ثالثا", "رابعا", "خامسا", "سادسا", "سابعا", "ثامنا",
+  "تاسعا", "عاشرا", "رقم", "لسنة", "سنة", "بناء", "على", "كتاب", "إشارة", "أمر", "إداري", "الموضوع", "العدد", "المرفقات",
+  "يرجى", "التفضل", "بالاطلاع", "اتخاذ", "الإجراءات", "الأصولية", "القانونية", "عقوبات", "توبيخ", "إنذار", "قطع",
+  "راتب", "حسم", "حبس", "توقيف", "المحاكمات", "الجزائية", "لقوى", "المرتكبة", "الجريمة", "العقوبة", "المبينة", "إزاء",
+  "صورة", "منه", "الشعبة", "القانونية", "نسخة", "معززة", "شهادة", "الشهداء", "الجرحى", "العلاوة", "الترقية", "المكافأة",
+  "المدرجة", "أسماؤهم", "القائمة", "المرفقة", "ربطاً", "ربطا", "واحد", "منهم", "الموقع", "المصادقة", "تنسيب", "تنسيبنا",
+
+  // كلمات شائعة وجذوع مفردة
+  "تاريخ", "انفكاك", "محال", "تقاعد", "تقيد", "سلوك", "مهني", "عريف", "حسين", "كامل", "جابر", "شمخي", "علي", "حسن", "أحمد", "محمد",
+  "محمود", "مصطفى", "مرتضى", "علاء", "عباس", "حميد", "مجيد", "سعيد", "جاسم", "كاظم", "كريم", "حيدر", "يوسف", "إبراهيم", "خالد",
+  "وليد", "سعد", "طه", "ياسين", "رعد", "سعدون", "هادي", "جعفر", "ضياء", "صلاح", "ريسان", "صبيح", "فاضل", "شخص", "خدمة", "ملاك",
+  "وزارة", "داخلية", "دفاع", "شرطة", "طاقة", "إدارة", "راتب", "أمر", "إداري", "أحكام", "مادة", "قانون", "أصول", "محاكمات", "جزائية",
+  "قوى", "أمن", "عقوبات", "عقوبة", "مرفقة", "ربط", "فوج", "أول", "أسماء", "صورة", "شعبة", "قانونية", "موضوع", "عدد", "مرفقات",
+  "قواعد", "مبينة", "إزاء", "كل", "واحد", "منهم", "حسب", "نوع", "جريمة", "مرتكبة", "قائمة", "السلوك", "المهني"
+]);
+
+const ARABIC_PREFIXES = ["وال", "بال", "كال", "فال", "لل", "ال", "و", "ب", "ف", "ل", "ك"];
+const ARABIC_SUFFIXES = ["تمون", "تكم", "ونا", "كما", "هم", "هن", "نا", "كم", "ها", "ين", "ون", "ات", "ه", "ة", "ي", "ا"];
 
 // معجم العبارات والمصطلحات القانونية والإدارية الثابتة للأوامر الإدارية والكتب الرسمية
 export const OFFICIAL_LEGAL_CORRECTIONS: [RegExp, string][] = [
@@ -65,7 +98,116 @@ export const OFFICIAL_LEGAL_CORRECTIONS: [RegExp, string][] = [
 ];
 
 /**
- * 1. معالجة وتصحيح طاطويل الحروف (الكشيدة ـــ) التي يقرؤها OCR بشكل خاطئ كـ "س" أو "سس" أو "يس" أو "نس" أو "سا"
+ * حساب مسافة ليفنشتاين لتقييم مدى تقارب الكلمتين المشوهة والمقترحة
+ */
+export function levenshteinDistance(a: string, b: string): number {
+  const tmp: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    tmp[i] = [i];
+  }
+  for (let j = 0; j <= b.length; j++) {
+    tmp[0][j] = j;
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      tmp[i][j] = Math.min(
+        tmp[i - 1][j] + 1,
+        tmp[i][j - 1] + 1,
+        tmp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return tmp[a.length][b.length];
+}
+
+/**
+ * البحث في القاموس عن الكلمة الأكثر شبهاً مع نسبة تطابق محددة
+ */
+export function getClosestDictionaryWord(word: string, threshold: number = 0.72): string | null {
+  let bestWord: string | null = null;
+  let bestSim = 0;
+
+  for (const dictWord of ARABIC_DICTIONARY) {
+    const distance = levenshteinDistance(word, dictWord);
+    const maxLen = Math.max(word.length, dictWord.length);
+    if (maxLen === 0) continue;
+    const sim = 1 - distance / maxLen;
+
+    if (sim > bestSim && sim >= threshold) {
+      bestSim = sim;
+      bestWord = dictWord;
+    }
+  }
+
+  return bestWord;
+}
+
+/**
+ * تصحيح الكلمة الفردية باستخدام عزل السوابق واللواحق والقاموس المورفولوجي
+ */
+export function correctSingleWord(word: string): string {
+  // تنظيف الكلمة من أي رموز أو علامات ترقيم جانبية لاستخلاص الكلمة الصافية
+  const cleanWord = word.replace(/[^\u0600-\u06FF]/g, "");
+  if (cleanWord.length <= 2) return word;
+
+  // 1. إذا كانت الكلمة موجودة في القاموس صراحة
+  if (ARABIC_DICTIONARY.has(cleanWord)) {
+    return word;
+  }
+
+  // 2. محاولة تجريد السوابق واللواحق
+  let detectedPrefix = "";
+  let detectedSuffix = "";
+  let stem = cleanWord;
+
+  // فحص السوابق
+  for (const pref of ARABIC_PREFIXES) {
+    if (cleanWord.startsWith(pref) && cleanWord.length - pref.length >= 3) {
+      detectedPrefix = pref;
+      stem = cleanWord.substring(pref.length);
+      break;
+    }
+  }
+
+  // فحص اللواحق على الجذع المتبقي
+  for (const suff of ARABIC_SUFFIXES) {
+    if (stem.endsWith(suff) && stem.length - suff.length >= 3) {
+      detectedSuffix = suff;
+      stem = stem.substring(0, stem.length - suff.length);
+      break;
+    }
+  }
+
+  // إذا كان الجذع المجرد صحيحاً وصريحاً في القاموس
+  if (ARABIC_DICTIONARY.has(stem)) {
+    let reconstructed = detectedPrefix + stem + detectedSuffix;
+    if (reconstructed.endsWith("يي")) {
+      reconstructed = reconstructed.substring(0, reconstructed.length - 1);
+    }
+    return word.replace(cleanWord, reconstructed);
+  }
+
+  // إذا وجدنا جذعاً قريباً جداً في القاموس للجذع المجرد
+  const matchedStem = getClosestDictionaryWord(stem, 0.70);
+  if (matchedStem) {
+    let reconstructed = detectedPrefix + matchedStem + detectedSuffix;
+    if (reconstructed.endsWith("يي")) {
+      reconstructed = reconstructed.substring(0, reconstructed.length - 1);
+    }
+    return word.replace(cleanWord, reconstructed);
+  }
+
+  // 3. مطابقة الكلمة الصافية بالكامل مع كلمات القاموس الكاملة
+  const matchedFullWord = getClosestDictionaryWord(cleanWord, 0.74);
+  if (matchedFullWord) {
+    return word.replace(cleanWord, matchedFullWord);
+  }
+
+  return word;
+}
+
+/**
+ * معالجة وتصحيح طاطويل الحروف (الكشيدة ـــ) التي يقرؤها OCR بشكل خاطئ كـ "س" أو "سس" أو "يس" أو "نس" أو "سا"
  */
 export function fixTatweelAndFalseSeen(text: string): string {
   if (!text) return "";
@@ -129,7 +271,7 @@ export function fixTatweelAndFalseSeen(text: string): string {
 }
 
 /**
- * 2. تجميع الحروف العربية المفككة داخل الكلمات (مثل: بقواع د -> بقواعد ، حس ين -> حسين)
+ * تجميع الحروف العربية المفككة داخل الكلمات (مثل: بقواع د -> بقواعد ، حس ين -> حسين)
  */
 export function fixDisjointedLetters(text: string): string {
   if (!text) return "";
@@ -155,7 +297,7 @@ export function fixDisjointedLetters(text: string): string {
 }
 
 /**
- * 3. فك دمج الأسماء والكلمات الملتصقة بدون مسافة (مثل: كاملجابرشمخي -> كامل جابر شمخي)
+ * فك دمج الأسماء والكلمات الملتصقة بدون مسافة (مثل: كاملجابرشمخي -> كامل جابر شمخي)
  */
 export function fixMergedWords(text: string): string {
   if (!text) return "";
@@ -207,10 +349,12 @@ export function normalizeAndCorrectArabicText(text: string): string {
     cleaned = cleaned.replace(pattern, repl);
   }
 
-  // 6. تنظيف المسافات الزائدة
+  // 6. تشغيل المدقق اللغوي المورفولوجي والقاموس ذو السوابق واللواحق كلمة بكلمة
   const lines = cleaned.split('\n');
   const processedLines = lines.map(line => {
-    return line.replace(/[ \t]+/g, ' ').trim();
+    const words = line.split(/\s+/);
+    const correctedWords = words.map(word => correctSingleWord(word));
+    return correctedWords.join(' ').replace(/[ \t]+/g, ' ').trim();
   });
 
   return processedLines.join('\n').trim();
