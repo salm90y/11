@@ -36,7 +36,12 @@ export default function PCSettings({ documents, pcDirectoryHandle, setPcDirector
   const [zipStatus, setZipStatus] = useState<'idle' | 'loading' | 'success'>('idle');
   const [zipProgress, setZipProgress] = useState(0);
 
+  // الكشف عن تشغيل التطبيق داخل إطار (Iframe)
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+  const [pickerError, setPickerError] = useState<string | null>(null);
+
   const handleSelectFolder = async () => {
+    setPickerError(null);
     try {
       if (!('showDirectoryPicker' in window)) {
         alert(
@@ -55,7 +60,13 @@ export default function PCSettings({ documents, pcDirectoryHandle, setPcDirector
       setSyncMessage(`تم ربط مجلد الحاسبة [${handle.name}] بنجاح! 🟢 يمكنك الآن المزامنة مباشرة.`);
     } catch (e: any) {
       console.error("Directory picker error:", e);
-      if (e.name !== 'AbortError') {
+      if (e.name === 'SecurityError' || e.message?.includes('Cross origin sub frames') || e.message?.includes('iframe')) {
+        setPickerError(
+          "تمنع حماية المتصفح اختيار مجلدات الكمبيوتر مباشرة من داخل نافذة المعاينة الحالية (Iframe).\n\n" +
+          "لحل هذا الخلل فوراً، يرجى فتح التطبيق في علامة تبويب كاملة ومنفصلة عن طريق الضغط على أيقونة الفتح في نافذة جديدة (أعلى اليمين)، " +
+          "أو استخدم 'الطريقة الثانية' بالجانب الأيسر لتحميل الأرشيف بالكامل كملف ZIP مهيكل فهو يعمل دائماً!"
+        );
+      } else if (e.name !== 'AbortError') {
         alert("حدث خطأ أثناء محاولة اختيار المجلد. يرجى التأكد من إعطاء الصلاحيات اللازمة.");
       }
     }
@@ -148,6 +159,35 @@ export default function PCSettings({ documents, pcDirectoryHandle, setPcDirector
                 <p className="text-xs text-slate-400 font-bold">حفظ تلقائي وفوري ومباشر إلى مجلد الأرشيف في جهازك</p>
               </div>
             </div>
+
+            {isIframe && (
+              <div className="p-4 bg-amber-50 border border-amber-200/60 rounded-2xl text-amber-900 text-xs leading-relaxed space-y-2 text-right">
+                <p className="font-extrabold text-xs text-amber-800 flex items-center gap-1.5">
+                  <span>💡 تنبيه أمني لبيئة المعاينة (Iframe):</span>
+                </p>
+                <p className="text-amber-800 font-medium leading-relaxed text-[11px]">
+                  بما أن التطبيق يفتح حالياً كإطار معاينة داخل المنصة، تمنع متصفحات الويب (كروم/إيدج) تحديد مجلدات الكمبيوتر لأسباب أمنية.
+                </p>
+                <div className="bg-white/80 p-3 rounded-xl border border-amber-200 text-[11px] text-slate-700 font-medium space-y-1">
+                  <p className="font-bold text-slate-850">لحل هذه المشكلة وتفعيل الحفظ التلقائي الفوري:</p>
+                  <ul className="list-disc list-inside space-y-1.5">
+                    <li>اضغط على أيقونة <strong className="text-blue-600">"الفتح في علامة تبويب جديدة"</strong> (أعلى يمين شاشة المعاينة) لتشغيله في علامة تبويب مستقلة تماماً وسيعمل الربط فوراً!</li>
+                    <li>أو استخدم <strong className="text-indigo-600">"الطريقة الثانية" (الملف المضغوط ZIP)</strong> المجاورة، فهي تعمل بنسبة 100% وبدون أي إعدادات إضافية.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {pickerError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-900 text-xs leading-relaxed space-y-2 text-right">
+                <p className="font-extrabold text-xs text-red-800 flex items-center gap-1.5">
+                  <span>⚠️ خطأ أمان المتصفح:</span>
+                </p>
+                <p className="text-red-800 font-medium text-[11px] whitespace-pre-wrap leading-relaxed">
+                  {pickerError}
+                </p>
+              </div>
+            )}
 
             <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-3.5">
               <div className="flex items-center justify-between border-b border-slate-200/50 pb-3">

@@ -161,12 +161,24 @@ export default function App() {
             );
             await downloadStructuredZip([doc]);
           } else {
-            // @ts-ignore
-            const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-            setPcDirectoryHandle(handle);
-            const savedPath = await saveDocToLocalHandle(doc, handle);
-            setPcSaveMessage(`تم الربط والحفظ بنجاح في مجلد الحاسبة: ${savedPath} ✅`);
-            setTimeout(() => setPcSaveMessage(''), 5000);
+            try {
+              // @ts-ignore
+              const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+              setPcDirectoryHandle(handle);
+              const savedPath = await saveDocToLocalHandle(doc, handle);
+              setPcSaveMessage(`تم الربط والحفظ بنجاح في مجلد الحاسبة: ${savedPath} ✅`);
+              setTimeout(() => setPcSaveMessage(''), 5000);
+            } catch (pickerErr: any) {
+              if (pickerErr.name === 'SecurityError' || pickerErr.message?.includes('Cross origin sub frames') || pickerErr.message?.includes('iframe')) {
+                alert(
+                  "تنبيه أمني: تمنع حماية المتصفح اختيار مجلدات الكمبيوتر من داخل إطار المعاينة السحابي (Iframe).\n\n" +
+                  "سنقوم الآن تلقائياً بتحميل المستند كملف ZIP مهيكل لتسهيل الحفظ الفوري، ولتفعيل الميزة المباشرة لاحقاً يرجى فتح التطبيق في علامة تبويب كاملة ومنفصلة عبر زر أعلى اليمين!"
+                );
+                await downloadStructuredZip([doc]);
+              } else if (pickerErr.name !== 'AbortError') {
+                throw pickerErr;
+              }
+            }
           }
         } else {
           // Alternative: Download single doc ZIP
@@ -175,7 +187,17 @@ export default function App() {
       }
     } catch (error: any) {
       console.error(error);
-      if (error.name !== 'AbortError') {
+      if (error.name === 'SecurityError' || error.message?.includes('Cross origin sub frames') || error.message?.includes('iframe')) {
+        alert(
+          "تنبيه أمني: تمنع حماية المتصفح تحديد مجلدات الكمبيوتر من داخل إطار المعاينة السحابي الحالي (Iframe).\n\n" +
+          "تم تحويل العملية تلقائياً وسنقوم الآن بتحميل المستند كملف ZIP مهيكل وبنفس التقسيمات المطلوبة لراحتك!"
+        );
+        try {
+          await downloadStructuredZip([doc]);
+        } catch (zipErr) {
+          console.error("Single zip fallback failed:", zipErr);
+        }
+      } else if (error.name !== 'AbortError') {
         alert(error.message || "حدث خطأ أثناء محاولة حفظ المستند.");
       }
     } finally {
