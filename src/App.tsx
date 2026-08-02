@@ -8,7 +8,9 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import DocumentUpload from './components/DocumentUpload';
 import DocumentList from './components/DocumentList';
-import { Document, Stats, UserRole, MentionedPerson } from './types';
+import PCSettings from './components/PCSettings';
+import { saveDocToLocalHandle, downloadStructuredZip } from './utils/pcArchive';
+import { Document, Stats, UserRole, MentionedPerson, ReferencedLetter } from './types';
 import { 
   Bell, 
   Search as SearchIcon, 
@@ -20,7 +22,8 @@ import {
   Edit3,
   Save,
   Check,
-  Sparkles
+  Sparkles,
+  HardDrive
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Barcode from 'react-barcode';
@@ -35,6 +38,7 @@ export default function App() {
     recentActivity: []
   });
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [pcDirectoryHandle, setPcDirectoryHandle] = useState<any | null>(null);
 
   // حالات تعديل الوثيقة المحفوظة يدوياً
   const [isEditingSavedDoc, setIsEditingSavedDoc] = useState(false);
@@ -43,6 +47,10 @@ export default function App() {
   const [editedSavedDocAttachments, setEditedSavedDocAttachments] = useState('');
   const [editedSavedDocCopyTo, setEditedSavedDocCopyTo] = useState('');
   const [editedSavedDocMentionedPersons, setEditedSavedDocMentionedPersons] = useState<MentionedPerson[]>([]);
+  const [editedSavedDocLetterNumber, setEditedSavedDocLetterNumber] = useState('');
+  const [editedSavedDocLetterDate, setEditedSavedDocLetterDate] = useState('');
+  const [editedSavedDocIssuingAuthority, setEditedSavedDocIssuingAuthority] = useState('');
+  const [editedSavedDocReferencedLetters, setEditedSavedDocReferencedLetters] = useState<ReferencedLetter[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
@@ -52,6 +60,10 @@ export default function App() {
       setEditedSavedDocAttachments(selectedDoc.attachments || '');
       setEditedSavedDocCopyTo(selectedDoc.copyTo || '');
       setEditedSavedDocMentionedPersons(selectedDoc.mentionedPersons || []);
+      setEditedSavedDocLetterNumber(selectedDoc.letterNumber || '');
+      setEditedSavedDocLetterDate(selectedDoc.letterDate || '');
+      setEditedSavedDocIssuingAuthority(selectedDoc.issuingAuthority || '');
+      setEditedSavedDocReferencedLetters(selectedDoc.referencedLetters || []);
       setIsEditingSavedDoc(false);
     }
   }, [selectedDoc]);
@@ -97,7 +109,11 @@ export default function App() {
           bodyText: editedSavedDocBodyText,
           attachments: editedSavedDocAttachments,
           copyTo: editedSavedDocCopyTo,
-          mentionedPersons: editedSavedDocMentionedPersons
+          mentionedPersons: editedSavedDocMentionedPersons,
+          letterNumber: editedSavedDocLetterNumber,
+          letterDate: editedSavedDocLetterDate,
+          issuingAuthority: editedSavedDocIssuingAuthority,
+          referencedLetters: editedSavedDocReferencedLetters
         })
       });
       if (response.ok) {
@@ -116,6 +132,54 @@ export default function App() {
       alert('حدث خطأ أثناء حفظ التعديلات');
     } finally {
       setIsSavingEdit(false);
+    }
+  };
+
+  const [isSavingToPC, setIsSavingToPC] = useState(false);
+  const [pcSaveMessage, setPcSaveMessage] = useState('');
+
+  const handleSaveToLocalPC = async (doc: Document) => {
+    setIsSavingToPC(true);
+    setPcSaveMessage('');
+    try {
+      if (pcDirectoryHandle) {
+        const savedPath = await saveDocToLocalHandle(doc, pcDirectoryHandle);
+        setPcSaveMessage(`تم الحفظ بنجاح في مجلد الحاسبة: ${savedPath} ✅`);
+        setTimeout(() => setPcSaveMessage(''), 5000);
+      } else {
+        // Fallback: If not connected, offer to download a structured zip of just this doc,
+        // or prompt them to connect
+        const confirmConnect = confirm(
+          "لم تقم بربط مجلد الحاسبة الشخصية بعد لتمكين الحفظ المباشر بنقرة واحدة.\n\n" +
+          "هل ترغب في ربط وتحديد مجلد الحاسبة الشخصية الآن؟"
+        );
+        if (confirmConnect) {
+          if (!('showDirectoryPicker' in window)) {
+            alert(
+              "متصفحك الحالي لا يدعم الربط المباشر مع مجلدات جهاز الكمبيوتر.\n\n" +
+              "سنقوم الآن بتنزيل هذا المستند لك مرتباً في الهيكل المطلوب تلقائياً كملف مضغوط (ZIP)!"
+            );
+            await downloadStructuredZip([doc]);
+          } else {
+            // @ts-ignore
+            const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            setPcDirectoryHandle(handle);
+            const savedPath = await saveDocToLocalHandle(doc, handle);
+            setPcSaveMessage(`تم الربط والحفظ بنجاح في مجلد الحاسبة: ${savedPath} ✅`);
+            setTimeout(() => setPcSaveMessage(''), 5000);
+          }
+        } else {
+          // Alternative: Download single doc ZIP
+          await downloadStructuredZip([doc]);
+        }
+      }
+    } catch (error: any) {
+      console.error(error);
+      if (error.name !== 'AbortError') {
+        alert(error.message || "حدث خطأ أثناء محاولة حفظ المستند.");
+      }
+    } finally {
+      setIsSavingToPC(false);
     }
   };
 
@@ -139,7 +203,7 @@ export default function App() {
               {activeTab === 'search' && 'البحث المتقدم'}
               {activeTab === 'stats' && 'التقارير والإحصائيات'}
               {activeTab === 'users' && 'إدارة المستخدمين'}
-              {activeTab === 'settings' && 'الإعدادات'}
+              {activeTab === 'settings' && 'أرشيف الحاسبة ومجلدات الكمبيوتر 💻'}
             </h2>
           </div>
 
@@ -191,8 +255,15 @@ export default function App() {
               {activeTab === 'documents' && <DocumentList documents={documents} onDelete={handleDelete} onView={setSelectedDoc} />}
               {activeTab === 'upload' && <DocumentUpload onUploadSuccess={handleUploadSuccess} />}
               {activeTab === 'stats' && <Dashboard stats={stats} />} {/* Reusing dashboard for stats for now */}
+              {activeTab === 'settings' && (
+                <PCSettings 
+                  documents={documents}
+                  pcDirectoryHandle={pcDirectoryHandle}
+                  setPcDirectoryHandle={setPcDirectoryHandle}
+                />
+              )}
               
-              {(activeTab === 'search' || activeTab === 'users' || activeTab === 'settings') && (
+              {(activeTab === 'search' || activeTab === 'users') && (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-slate-400 bg-white rounded-3xl border border-slate-100 p-12 text-center">
                   <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6">
                     <FileText size={48} className="text-slate-200" />
@@ -235,6 +306,19 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {pcSaveMessage && (
+                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-2 rounded-xl">
+                      {pcSaveMessage}
+                    </span>
+                  )}
+                  <button 
+                    onClick={() => handleSaveToLocalPC(selectedDoc)}
+                    disabled={isSavingToPC}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold rounded-xl transition-all flex items-center gap-2 shadow-md shadow-blue-500/10"
+                  >
+                    <HardDrive size={16} />
+                    <span>{isSavingToPC ? 'جاري الحفظ...' : 'حفظ في مجلد الحاسبة 💻'}</span>
+                  </button>
                   <button className="p-3 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
                     <Printer size={20} />
                   </button>
@@ -261,7 +345,7 @@ export default function App() {
                 <div className="w-full lg:w-[500px] border-r border-slate-100 flex flex-col bg-white overflow-y-auto">
                   <div className="p-6 border-b border-slate-100 flex flex-col">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-bold text-slate-900">النصوص المستخرجة</h4>
+                      <h4 className="font-bold text-slate-900">مضمون نص الكتاب الإداري المستخلص</h4>
                       {isEditingSavedDoc ? (
                         <div className="flex gap-2">
                           <button
@@ -279,6 +363,9 @@ export default function App() {
                               setEditedSavedDocAttachments(selectedDoc.attachments || '');
                               setEditedSavedDocCopyTo(selectedDoc.copyTo || '');
                               setEditedSavedDocMentionedPersons(selectedDoc.mentionedPersons || []);
+                              setEditedSavedDocLetterNumber(selectedDoc.letterNumber || '');
+                              setEditedSavedDocLetterDate(selectedDoc.letterDate || '');
+                              setEditedSavedDocIssuingAuthority(selectedDoc.issuingAuthority || '');
                               setIsEditingSavedDoc(false);
                             }}
                             className="flex items-center gap-1 px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold rounded-lg transition-colors"
@@ -301,33 +388,57 @@ export default function App() {
                         className="w-full h-72 p-4 bg-slate-50 text-slate-800 text-base rounded-2xl border border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-serif text-right resize-none"
                         style={{ fontFamily: "'Traditional Arabic', 'Amiri', 'Arial', sans-serif" }}
                         dir="rtl"
-                        value={editedSavedDocText}
-                        onChange={(e) => setEditedSavedDocText(e.target.value)}
+                        value={editedSavedDocBodyText || editedSavedDocText}
+                        onChange={(e) => setEditedSavedDocBodyText(e.target.value)}
                       />
                     ) : (
                       <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                        {selectedDoc.extractedText || 'لا توجد نصوص مستخرجة'}
+                        {selectedDoc.bodyText || selectedDoc.extractedText || 'لا توجد نصوص مستخرجة'}
                       </div>
                     )}
-
+ 
                     {/* حقول هيكلية الكتاب الإداري المستخلصة */}
                     <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
                       <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <Sparkles className="text-blue-600" size={16} />
                         بيانات وهيكلية الكتاب الإداري المستخلصة
                       </h4>
-
+ 
                       {isEditingSavedDoc ? (
                         <div className="space-y-4">
-                          {/* 1. نص أصل القرار */}
+                          {/* جهة إصدار الكتاب */}
                           <div className="space-y-1">
-                            <label className="block text-xs font-bold text-slate-700">📝 مضمون القرار / نص الكتاب الإداري:</label>
-                            <textarea
-                              value={editedSavedDocBodyText}
-                              onChange={(e) => setEditedSavedDocBodyText(e.target.value)}
-                              rows={4}
-                              className="w-full p-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="مضمون القرار..."
+                            <label className="block text-xs font-bold text-slate-700">🏢 جهة إصدار الكتاب:</label>
+                            <input
+                              type="text"
+                              value={editedSavedDocIssuingAuthority}
+                              onChange={(e) => setEditedSavedDocIssuingAuthority(e.target.value)}
+                              className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="جهة إصدار الكتاب..."
+                            />
+                          </div>
+
+                          {/* رقم الكتاب */}
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">🔢 رقم الكتاب / العدد:</label>
+                            <input
+                              type="text"
+                              value={editedSavedDocLetterNumber}
+                              onChange={(e) => setEditedSavedDocLetterNumber(e.target.value)}
+                              className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="رقم الكتاب..."
+                            />
+                          </div>
+
+                          {/* تاريخ الكتاب */}
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">📅 تاريخ الكتاب:</label>
+                            <input
+                              type="text"
+                              value={editedSavedDocLetterDate}
+                              onChange={(e) => setEditedSavedDocLetterDate(e.target.value)}
+                              className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="تاريخ الكتاب..."
                             />
                           </div>
 
@@ -424,9 +535,94 @@ export default function App() {
                               ))}
                             </div>
                           </div>
+
+                          {/* 5. الكتب والوثائق الأخرى المشار إليها في المتن */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <div className="flex justify-between items-center">
+                              <label className="block text-xs font-bold text-slate-700">📄 الكتب والوثائق الأخرى المشار إليها:</label>
+                              <button
+                                type="button"
+                                onClick={() => setEditedSavedDocReferencedLetters([...editedSavedDocReferencedLetters, { letterNumber: '', letterDate: '', issuingAuthority: '' }])}
+                                className="text-[11px] text-indigo-600 font-bold hover:underline"
+                              >
+                                + إضافة كتاب مشار إليه
+                              </button>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto p-1 bg-indigo-50/20 rounded-xl border border-indigo-100/50">
+                              {editedSavedDocReferencedLetters.map((rl, rlIdx) => (
+                                <div key={rlIdx} className="flex gap-1.5 items-center bg-white p-1.5 rounded-lg shadow-sm border border-slate-100">
+                                  <input
+                                    type="text"
+                                    placeholder="رقم الكتاب"
+                                    value={rl.letterNumber}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocReferencedLetters(editedSavedDocReferencedLetters.map((x, i) => i === rlIdx ? { ...x, letterNumber: val } : x));
+                                    }}
+                                    className="w-24 px-1.5 py-1 text-[10px] border border-slate-200 rounded-md font-mono font-bold"
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="تاريخه"
+                                    value={rl.letterDate}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocReferencedLetters(editedSavedDocReferencedLetters.map((x, i) => i === rlIdx ? { ...x, letterDate: val } : x));
+                                    }}
+                                    className="w-24 px-1.5 py-1 text-[10px] border border-slate-200 rounded-md"
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="جهة الإصدار"
+                                    value={rl.issuingAuthority}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedSavedDocReferencedLetters(editedSavedDocReferencedLetters.map((x, i) => i === rlIdx ? { ...x, issuingAuthority: val } : x));
+                                    }}
+                                    className="flex-1 px-1.5 py-1 text-[10px] border border-slate-200 rounded-md"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditedSavedDocReferencedLetters(editedSavedDocReferencedLetters.filter((_, i) => i !== rlIdx))}
+                                    className="text-red-500 text-xs font-bold px-1 hover:text-red-700"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                              {editedSavedDocReferencedLetters.length === 0 && (
+                                <p className="text-[10px] text-center text-slate-400 py-2">لا توجد كتب مشار إليها مضافة حالياً</p>
+                              )}
+                            </div>
+                          </div>
+
                         </div>
                       ) : (
                         <div className="space-y-4">
+                          {/* عرض البيانات المستخلصة الرئيسية */}
+                          {(selectedDoc.issuingAuthority || selectedDoc.letterNumber || selectedDoc.letterDate) && (
+                            <div className="grid grid-cols-1 gap-2 bg-blue-50/50 p-3.5 rounded-2xl border border-blue-100 text-xs">
+                              {selectedDoc.issuingAuthority && (
+                                <div className="flex justify-between items-center py-1 border-b border-blue-100/40">
+                                  <span className="font-bold text-slate-800">🏢 جهة الإصدار:</span>
+                                  <span className="text-slate-700 font-medium">{selectedDoc.issuingAuthority}</span>
+                                </div>
+                              )}
+                              {selectedDoc.letterNumber && (
+                                <div className="flex justify-between items-center py-1 border-b border-blue-100/40">
+                                  <span className="font-bold text-slate-800">🔢 رقم الكتاب / العدد:</span>
+                                  <span className="text-slate-700 font-mono font-bold">{selectedDoc.letterNumber}</span>
+                                </div>
+                              )}
+                              {selectedDoc.letterDate && (
+                                <div className="flex justify-between items-center py-1">
+                                  <span className="font-bold text-slate-800">📅 تاريخ الكتاب:</span>
+                                  <span className="text-slate-700 font-medium">{selectedDoc.letterDate}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {/* عرض مضمون القرار المستخلص */}
                           {selectedDoc.bodyText && (
                             <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
@@ -472,6 +668,35 @@ export default function App() {
                                         <td className="p-2 text-slate-600 font-mono">{person.statisticalNumber || '-'}</td>
                                         <td className="p-2 font-bold text-blue-800">{person.rank}</td>
                                         <td className="p-2 text-slate-800 font-medium">{person.name}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* عرض الكتب والوثائق الأخرى المشار إليها في المتن */}
+                          {selectedDoc.referencedLetters && selectedDoc.referencedLetters.length > 0 && (
+                            <div className="space-y-2 pt-2 border-t border-slate-100">
+                              <p className="font-bold text-xs text-slate-800">📄 الكتب والوثائق الأخرى المشار إليها في المتن:</p>
+                              <div className="overflow-hidden border border-slate-150 rounded-xl bg-slate-50/50">
+                                <table className="w-full border-collapse text-right text-[11px]">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                                      <th className="p-2 text-center w-8">ت</th>
+                                      <th className="p-2 w-32">رقم الكتاب / العدد</th>
+                                      <th className="p-2 w-28">تاريخ الكتاب</th>
+                                      <th className="p-2">جهة إصدار الكتاب المشار إليه</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {selectedDoc.referencedLetters.map((refLetter, rIdx) => (
+                                      <tr key={rIdx} className="hover:bg-white bg-slate-50/30">
+                                        <td className="p-2 text-center font-semibold text-slate-400">{rIdx + 1}</td>
+                                        <td className="p-2 text-slate-700 font-mono font-bold">{refLetter.letterNumber || '-'}</td>
+                                        <td className="p-2 text-slate-600 font-medium">{refLetter.letterDate || '-'}</td>
+                                        <td className="p-2 font-bold text-slate-800">{refLetter.issuingAuthority}</td>
                                       </tr>
                                     ))}
                                   </tbody>

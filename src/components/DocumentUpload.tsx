@@ -24,11 +24,13 @@ import {
   Settings,
   HelpCircle,
   Edit3,
-  Plus
+  Plus,
+  FolderCheck,
+  ChevronLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Barcode from 'react-barcode';
-import { Document, DocumentCategory, MentionedPerson } from '../types';
+import { Document, DocumentCategory, MentionedPerson, ReferencedLetter } from '../types';
 import { normalizeAndCorrectArabicText } from '../utils/arabicPostProcessor';
 import { extractOfficialLetterMetadata, ALL_IRAQI_RANKS } from '../utils/letterParser';
 
@@ -62,6 +64,10 @@ interface UploadQueueItem {
   attachments: string;
   copyTo: string;
   mentionedPersons: MentionedPerson[];
+  letterNumber?: string;
+  letterDate?: string;
+  issuingAuthority?: string;
+  referencedLetters?: ReferencedLetter[];
 }
 
 const CLASSIFICATION_KEYWORDS: Record<DocumentCategory, string[]> = {
@@ -306,7 +312,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
         bodyText: '',
         attachments: '',
         copyTo: '',
-        mentionedPersons: []
+        mentionedPersons: [],
+        letterNumber: '',
+        letterDate: '',
+        issuingAuthority: '',
+        referencedLetters: []
       });
     });
 
@@ -405,7 +415,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
         bodyText: parsedMetadata.bodyText,
         attachments: parsedMetadata.attachments,
         copyTo: parsedMetadata.copyTo,
-        mentionedPersons: parsedMetadata.mentionedPersons
+        mentionedPersons: parsedMetadata.mentionedPersons,
+        letterNumber: parsedMetadata.letterNumber,
+        letterDate: parsedMetadata.letterDate,
+        issuingAuthority: parsedMetadata.issuingAuthority,
+        referencedLetters: parsedMetadata.referencedLetters || []
       });
     } catch (error: any) {
       console.error('OCR Error:', error);
@@ -428,8 +442,12 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
     const doc = queue[idx];
     if (!doc || !doc.preview) return null;
 
+    const cleanId = doc.letterNumber && doc.letterNumber.trim()
+      ? doc.letterNumber.trim().replace(/[\/\s]/g, '-')
+      : Math.random().toString(36).substr(2, 9);
+
     const newDoc: Document = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: cleanId,
       title: doc.title,
       category: (doc.ocrResult?.category as DocumentCategory) || DocumentCategory.OTHER,
       uploadDate: new Date().toISOString(),
@@ -443,7 +461,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
       bodyText: doc.bodyText || '',
       attachments: doc.attachments || '',
       copyTo: doc.copyTo || '',
-      mentionedPersons: doc.mentionedPersons || []
+      mentionedPersons: doc.mentionedPersons || [],
+      letterNumber: doc.letterNumber || '',
+      letterDate: doc.letterDate || '',
+      issuingAuthority: doc.issuingAuthority || '',
+      referencedLetters: doc.referencedLetters || []
     };
 
     try {
@@ -688,7 +710,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                         <div className="flex items-center justify-between">
                           <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                             <Type size={16} className="text-blue-500" />
-                            استخراج النصوص والتصحيح اليدوي
+                            مضمون نص الكتاب الإداري المستخلص
                           </h4>
                           {activeDoc.ocrResult && (
                             <div className="flex items-center gap-1.5">
@@ -794,11 +816,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                                 {activeDoc.isEditingManually ? (
                                   /* حقل التعديل اليدوي للنص المستخرج حديثاً */
                                   <textarea
-                                    value={activeDoc.ocrResult.text}
+                                    value={activeDoc.bodyText || activeDoc.ocrResult.text || ''}
                                     onChange={(e) => {
                                       const updatedText = e.target.value;
                                       updateQueueItem(activeDoc.id, {
-                                        ocrResult: { ...activeDoc.ocrResult, text: updatedText }
+                                        bodyText: updatedText
                                       });
                                     }}
                                     className="w-full h-44 p-3 bg-slate-950 text-slate-100 text-base rounded-xl border border-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none leading-loose font-serif text-right resize-none"
@@ -819,7 +841,7 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                                         <span className="text-[11px] text-white">جاري تنقيح وتصحيح النص وتطبيق المعالجات اللغوية...</span>
                                       </div>
                                     )}
-                                    {activeDoc.ocrResult.text || 'لا يوجد نص مستخرج أو تم تفريغه كلياً.'}
+                                    {activeDoc.bodyText || activeDoc.ocrResult.text || 'لا يوجد نص مستخلص لمضمون القرار.'}
                                   </div>
                                 )}
                               </motion.div>
@@ -1000,19 +1022,88 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                         </div>
 
                         <div className="grid grid-cols-1 gap-5">
-                          {/* 1. نص أصل القرار (ما بعد الموضوع) */}
-                          <div className="space-y-2">
-                            <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                              <span>📝 أصل مضمون القرار / نص الكتاب الإداري:</span>
-                              <span className="text-[10px] text-slate-400 font-normal">(تم استخلاصه تلقائياً من بعد عبارة "الموضوع" وحتى نهاية القرار)</span>
-                            </label>
-                            <textarea
-                              value={activeDoc.bodyText || ''}
-                              onChange={(e) => updateQueueItem(activeDoc.id, { bodyText: e.target.value })}
-                              rows={5}
-                              className="w-full p-3.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
-                              placeholder="مضمون أو نص القرار المستخلص..."
-                            />
+                          {/* حقول الأرقام والبيانات الرئيسية للكتاب */}
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                            {/* جهة إصدار الكتاب */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">🏢 جهة إصدار الكتاب الإداري (المجلد الرئيسي):</label>
+                              <input
+                                type="text"
+                                value={activeDoc.issuingAuthority || ''}
+                                onChange={(e) => updateQueueItem(activeDoc.id, { issuingAuthority: e.target.value })}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-bold"
+                                placeholder="مثال: وزارة الداخلية / مديرية الشرطة..."
+                              />
+                            </div>
+
+                            {/* تصنيف الكتاب / المجلد الفرعي */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">📁 تصنيف الكتاب (المجلد الفرعي):</label>
+                              <select
+                                value={activeDoc.ocrResult?.category || 'أخرى'}
+                                onChange={(e) => {
+                                  const updatedCategory = e.target.value;
+                                  updateQueueItem(activeDoc.id, {
+                                    ocrResult: {
+                                      ...activeDoc.ocrResult!,
+                                      category: updatedCategory
+                                    }
+                                  });
+                                }}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm font-bold focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                              >
+                                {Object.values(DocumentCategory).map((cat) => (
+                                  <option key={cat} value={cat}>
+                                    {cat}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* رقم الكتاب / العدد */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">🔢 رقم الكتاب / اسم المستند:</label>
+                              <input
+                                type="text"
+                                value={activeDoc.letterNumber || ''}
+                                onChange={(e) => updateQueueItem(activeDoc.id, { letterNumber: e.target.value })}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono font-bold"
+                                placeholder="مثال: د/أ/١٢٣٤"
+                              />
+                            </div>
+
+                            {/* تاريخ الكتاب */}
+                            <div className="space-y-2">
+                              <label className="block text-xs font-bold text-slate-700">📅 تاريخ الكتاب الإداري:</label>
+                              <input
+                                type="text"
+                                value={activeDoc.letterDate || ''}
+                                onChange={(e) => updateQueueItem(activeDoc.id, { letterDate: e.target.value })}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                placeholder="مثال: ٢٠٢٦/٨/١"
+                              />
+                            </div>
+                          </div>
+
+                          {/* مسار الحفظ المقترح المخطط هيكلياً */}
+                          <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex flex-col md:flex-row gap-3 items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <FolderCheck className="text-blue-600 shrink-0" size={18} />
+                              <span className="text-xs font-extrabold text-slate-700">مسار حفظ الملف الهيكلي بالأرشيف:</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-blue-700 font-extrabold" dir="rtl">
+                              <span className="bg-blue-100/80 px-2.5 py-1 rounded-lg border border-blue-200/50">
+                                {activeDoc.issuingAuthority?.trim() || 'جهة إصدار غير محددة'}
+                              </span>
+                              <ChevronLeft size={14} className="text-blue-400 rotate-180 md:rotate-0" />
+                              <span className="bg-indigo-100/80 px-2.5 py-1 rounded-lg border border-indigo-200/50">
+                                {activeDoc.ocrResult?.category || 'أخرى'}
+                              </span>
+                              <ChevronLeft size={14} className="text-blue-400 rotate-180 md:rotate-0" />
+                              <span className="bg-slate-100 text-slate-700 font-mono px-2.5 py-1 rounded-lg border border-slate-200/50">
+                                {activeDoc.letterNumber?.trim() || 'رقم-تلقائي'}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -1168,6 +1259,114 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
                                             }}
                                             className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
                                             title="إزالة هذا الاسم"
+                                          >
+                                            <X size={14} />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 5. الكتب والوثائق الأخرى المشار إليها في متن الكتاب */}
+                          <div className="space-y-3 pt-5 border-t border-slate-100">
+                            <div className="flex justify-between items-center">
+                              <div className="space-y-0.5">
+                                <label className="block text-xs font-bold text-slate-800">📄 الكتب والوثائق الأخرى المشار إليها في المتن:</label>
+                                <p className="text-[10px] text-slate-400">يمكنك تعديل الكتب والقرارات الأخرى المستخلصة التي تمت الإشارة إليها في المتن، أو إضافة كتب جديدة يدوياً.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...(activeDoc.referencedLetters || []), { letterNumber: '', letterDate: '', issuingAuthority: '' }];
+                                  updateQueueItem(activeDoc.id, { referencedLetters: updated });
+                                }}
+                                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-colors shadow-sm"
+                              >
+                                <Plus size={14} />
+                                <span>إضافة كتاب مشار إليه</span>
+                              </button>
+                            </div>
+
+                            {(!activeDoc.referencedLetters || activeDoc.referencedLetters.length === 0) ? (
+                              <div className="text-center py-6 border border-dashed border-slate-200 rounded-2xl text-slate-400 text-xs">
+                                لم يتم العثور على كتب أو وثائق مشار إليها مستخلصة تلقائياً في متن هذا الكتاب. انقر على "إضافة كتاب مشار إليه" للبدء بالتدوين يدوياً.
+                              </div>
+                            ) : (
+                              <div className="overflow-hidden border border-slate-200 rounded-2xl bg-indigo-50/10">
+                                <table className="w-full border-collapse text-right text-xs">
+                                  <thead>
+                                    <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold">
+                                      <th className="p-3 w-16 text-center">ت</th>
+                                      <th className="p-3">جهة إصدار الكتاب المشار إليه</th>
+                                      <th className="p-3 w-44">رقم الكتاب / العدد</th>
+                                      <th className="p-3 w-40">تاريخ الكتاب</th>
+                                      <th className="p-3 w-16 text-center">إجراءات</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {activeDoc.referencedLetters.map((refLetter, rIdx) => (
+                                      <tr key={rIdx} className="hover:bg-slate-50/80 bg-white">
+                                        <td className="p-3 text-center font-semibold text-slate-400">{rIdx + 1}</td>
+                                        
+                                        {/* جهة الإصدار */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={refLetter.issuingAuthority}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.referencedLetters!.map((rl, i) => i === rIdx ? { ...rl, issuingAuthority: val } : rl);
+                                              updateQueueItem(activeDoc.id, { referencedLetters: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs"
+                                            placeholder="مثال: مديرية الموارد البشرية..."
+                                          />
+                                        </td>
+
+                                        {/* رقم الكتاب */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={refLetter.letterNumber}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.referencedLetters!.map((rl, i) => i === rIdx ? { ...rl, letterNumber: val } : rl);
+                                              updateQueueItem(activeDoc.id, { referencedLetters: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs font-mono font-bold"
+                                            placeholder="مثال: ٥٤٣٢"
+                                          />
+                                        </td>
+
+                                        {/* تاريخ الكتاب */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={refLetter.letterDate}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              const updated = activeDoc.referencedLetters!.map((rl, i) => i === rIdx ? { ...rl, letterDate: val } : rl);
+                                              updateQueueItem(activeDoc.id, { referencedLetters: updated });
+                                            }}
+                                            className="w-full px-2 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-xs"
+                                            placeholder="مثال: ٢٠٢٦/٧/١"
+                                          />
+                                        </td>
+
+                                        {/* حذف الصف */}
+                                        <td className="p-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = activeDoc.referencedLetters!.filter((_, i) => i !== rIdx);
+                                              updateQueueItem(activeDoc.id, { referencedLetters: updated });
+                                            }}
+                                            className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                                            title="إزالة هذا الكتاب"
                                           >
                                             <X size={14} />
                                           </button>

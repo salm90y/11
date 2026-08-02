@@ -250,7 +250,7 @@ app.post('/api/documents', (req, res) => {
 
 app.put('/api/documents/:id', (req, res) => {
   const { id } = req.params;
-  const { extractedText, title, bodyText, attachments, copyTo, mentionedPersons } = req.body;
+  const { extractedText, title, bodyText, attachments, copyTo, mentionedPersons, letterNumber, letterDate, issuingAuthority, referencedLetters } = req.body;
   const doc = db.documents.find(d => d.id === id);
   if (doc) {
     if (extractedText !== undefined) doc.extractedText = extractedText;
@@ -259,6 +259,10 @@ app.put('/api/documents/:id', (req, res) => {
     if (attachments !== undefined) doc.attachments = attachments;
     if (copyTo !== undefined) doc.copyTo = copyTo;
     if (mentionedPersons !== undefined) doc.mentionedPersons = mentionedPersons;
+    if (letterNumber !== undefined) doc.letterNumber = letterNumber;
+    if (letterDate !== undefined) doc.letterDate = letterDate;
+    if (issuingAuthority !== undefined) doc.issuingAuthority = issuingAuthority;
+    if (referencedLetters !== undefined) doc.referencedLetters = referencedLetters;
     return res.json({ success: true, doc });
   }
   return res.status(404).json({ error: 'المستند غير موجود' });

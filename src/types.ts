@@ -53,6 +53,12 @@ export interface MentionedPerson {
   name: string;
 }
 
+export interface ReferencedLetter {
+  letterNumber: string;
+  letterDate: string;
+  issuingAuthority: string;
+}
+
 export interface Document extends DocumentMetadata {
   extractedText: string;
   fileData: string; // Base64
@@ -60,6 +66,10 @@ export interface Document extends DocumentMetadata {
   attachments?: string;
   copyTo?: string;
   mentionedPersons?: MentionedPerson[];
+  referencedLetters?: ReferencedLetter[];
+  letterNumber?: string;
+  letterDate?: string;
+  issuingAuthority?: string;
 }
 
 export interface Stats {

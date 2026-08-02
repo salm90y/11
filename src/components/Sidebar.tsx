@@ -34,7 +34,7 @@ const menuItems = [
   { id: 'search', label: 'البحث المتقدم', icon: Search },
   { id: 'stats', label: 'الإحصائيات', icon: BarChart3 },
   { id: 'users', label: 'إدارة المستخدمين', icon: Users },
-  { id: 'settings', label: 'الإعدادات', icon: Settings },
+  { id: 'settings', label: 'أرشيف الحاسبة الشخصية 💻', icon: Settings },
 ];
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
